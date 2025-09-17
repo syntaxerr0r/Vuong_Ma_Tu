@@ -155,15 +155,15 @@
     }
 
     function mapStar(num) {
-    if (typeof num !== 'number') return null;
-    const lastDigit = num % 10;
-    if (lastDigit === 1) return 3;
-    if (lastDigit === 0) return 3;
-    if (lastDigit === 5) return 6;
-    if (lastDigit === 6) return 6;
-    if (lastDigit === 9) return 9;
-    // có thể thêm logic khác nếu cần map 0 hoặc các số lẻ đặc biệt
-    return null;
+        if (typeof num !== 'number') return null;
+        const lastDigit = num % 10;
+        if (lastDigit === 1) return 3;
+        if (lastDigit === 0) return 3;
+        if (lastDigit === 5) return 6;
+        if (lastDigit === 6) return 6;
+        if (lastDigit === 9) return 9;
+        // có thể thêm logic khác nếu cần map 0 hoặc các số lẻ đặc biệt
+        return null;
 }
 
 
