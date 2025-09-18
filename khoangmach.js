@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HH3D Khoang Mach
 // @namespace    Dr. Trune
-// @version      1.2
+// @version      1.3
 // @description  Thêm Tu Vi và tỷ lệ thắng ngay dưới nút Tấn Công
 // @author       Dr. Trune
 // @match        https://hoathinh3d.lol/khoang-mach*
@@ -17,7 +17,7 @@
     const weburl = 'https://hoathinh3d.lol';
 
     // HÀM XỬ LÝ CAN THIỆP THỜI GIAN
-    const NEW_DELAY = 50;
+    const NEW_DELAY = 500;
     const originalSetInterval = window.setInterval;
     window.setInterval = function(callback, delay, ...args) {
         let actualDelay = delay;
