@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     https://github.com/drtrune/hoathinh3d.script
-// @version       3.3.7
+// @version       3.4
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.lol/*
@@ -20,7 +20,7 @@
     const weburl = 'https://hoathinh3d.lol/';
     const ajaxUrl = weburl + 'wp-content/themes/halimmovies-child/hh3d-ajax.php';
     let questionDataCache = null;
-    const QUESTION_DATA_URL = 'https://raw.githubusercontent.com/drtrune/hoathinh3d.script/main/vandap.json';
+    const QUESTION_DATA_URL = 'https://raw.githubusercontent.com/syntaxerr0r/HH3D-auto/refs/heads/main/vandap.json';
     let isCssInjected = false;
     let userBetCount = 0;
     let userBetStones = [];
