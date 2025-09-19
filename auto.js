@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     https://github.com/drtrune/hoathinh3d.script
-// @version       3.4
+// @version       3.5
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.lol/*
-// @run-at        document-idle
+// @run-at        document-start
 // @grant         GM_xmlhttpRequest
 // @connect       raw.githubusercontent.com
 // ==/UserScript==
@@ -24,7 +24,31 @@
     let isCssInjected = false;
     let userBetCount = 0;
     let userBetStones = [];
-    // Cấu trúc menu đã được cập nhật để chỉ có một nút Điểm danh - Tế lễ - Vấn đáp
+
+    // Chỉ override khi đang ở trang Khoáng Mạch
+    const NEW_DELAY = 500; // Tăng delay lên giá trị hợp lý hơn
+    const originalSetInterval = window.setInterval;
+    window.setInterval = function(callback, delay, ...args) {
+        let actualDelay = delay;
+        try {
+            // Kiểm tra nếu callback là countdown function thông qua thuộc tính đặc biệt
+            if (typeof callback === 'function' && callback._isCountdown) {
+                actualDelay = NEW_DELAY;
+                console.log('Adjusted countdown delay:', actualDelay);
+            }
+        } catch (e) {
+            console.error('Error in setInterval override:', e);
+        }
+        return originalSetInterval(callback, actualDelay, ...args);
+    };
+
+    // Đánh dấu countdown function
+    function createCountdownCallback(fn) {
+        fn._isCountdown = true;
+        return fn;
+    }
+
+    // Cấu trúc menu
     const LINK_GROUPS = [{
         name: 'Autorun',
         links: [{
@@ -174,7 +198,7 @@
 
         return null;
     }
-    
+
     // Lưu trữ trạng thái các hoạt động đã thực hiện
     class TaskTracker {
         constructor(storageKey = 'dailyTasks') {
@@ -770,7 +794,7 @@
                     showNotification(`✅ Cược thành công vào ${stone.name}!<br>Tỷ lệ <b>x${stone.reward_multiplier}</b>`, 'success');
                     this._alreadyClaimedReward = false; // reset flag
                     return true;
-                } 
+                }
                 else if (data.data === 'Vui lòng nhận thưởng kỳ trước rồi mới tiếp tục đặt cược.') {
                     if (!this._alreadyClaimedReward) {
                         if (await this.#claimReward()) {
@@ -986,15 +1010,7 @@
 
             const timeResponse = await fetch(url, {
                 method: 'POST',
-                headers: headers,
-                body: `action=get_remaining_time_tltm&security=${securityNonce}`,
-                credentials: 'include'
-            });
-
-            const timeResponseData = await timeResponse.json();
-            if (timeResponseData.success) {
-                taskTracker.adjustTaskTime(accountId, 'thiluyen', timePlus(timeResponseData.data.time_remaining));
-            }
+            })
 
         } catch (e) {
             showNotification(`Lỗi mạng khi thực hiện Thí Luyện: ${e.message}`, 'error');
@@ -1068,7 +1084,7 @@
                         showNotification(message, 'success');
                         if (message.includes('đã hoàn thành Phúc Lợi ngày hôm nay')) {
                             taskTracker.markTaskDone(accountId, 'phucloi');
-                        } else taskTracker.adjustTaskTime(accountId,'phucloi', timePlus('30:00'));  //30 phút cho lần mở rương tiếp theo
+                        } else taskTracker.adjustTaskTime(accountId,'phucloi', timePlus('30:00'));
                     } else {
                         const errorMessage = dataOpen.data && dataOpen.data.message ? dataOpen.data.message : 'Lỗi không xác định khi mở rương.';
                         showNotification(errorMessage, 'error');
@@ -1329,7 +1345,7 @@
         }
 
         /**
-         * Nhận thưởng Hoang Vực.
+         * Nhận thưởng Hoang Vuc.
          */
         async claimHoangVucRewards(nonce) {
             const payload = new URLSearchParams();
@@ -1903,7 +1919,6 @@
             // Bước 5: Nhận thưởng nếu có
             const rewardResult = await this.receiveReward(nonce);
         }
-
         /**Thuê Tiêu Viêm để hoàn thành khiêu chiến */
         async thueTieuViem() {
             const nonce = await getNonce();
@@ -2114,7 +2129,7 @@
                 if (msg.includes('đạt đủ thưởng ngày')) {
                     taskTracker.markTaskDone(accountId, 'khoangmach');
                     showNotification(msg, 'error');
-                } 
+                }
                 else if (msg.includes('Có phần thưởng chưa nhận')) {
                     // Nếu bị sát hại tại khoáng mạch → nhận thưởng trước
                     const nonce = await this.#getNonce(/action: 'claim_reward_km',\s*security: '([a-f0-9]+)'/);
@@ -2150,7 +2165,7 @@
                 return d.success ? d.data : (showNotification(d.message || 'Lỗi lấy thông tin người chơi.', 'error'), null);
             } catch (e) { console.error(`${this.logPrefix} ❌ Lỗi mạng (lấy user):`, e); return null; }
         }
-        
+
         async takeOverMine(mineId) {
             const nonce = await this.#getNonce(/action: 'change_mine_owner',\s*mine_id:\s*mineId,\s*security: '([a-f0-9]+)'/);
             if (!nonce) { showNotification('Lỗi nonce (take_over).', 'error'); return false; }
@@ -2304,7 +2319,7 @@
                     break; // Thoát vòng lặp sau khi nhận thưởng
                 } else {
                     console.log(`[Khoáng mạch] Bonus tu vi ${bonus}% chưa đạt ngưỡng ${rewardMode}`);
-                    
+
                     // Nếu có thể, thử takeover trước (option đoạt mỏ khi chưa buff)
                     if (autoTakeover && mineInfo.can_takeover) {
                         console.log(`[Khoáng mạch] Thử đoạt mỏ ${targetMine.id}...`);
@@ -2329,7 +2344,7 @@
                     }
 
                     // Nếu không thể làm gì, thoát khỏi vòng lặp
-                    showNotification(`[Khoáng mạch] Bonus ${bonus}% chưa đạt ${rewardMode}%<br>Hiện không thể đoạt mỏ.<br>Không thực hiện được hành động nào.`, 'info', 6000)
+                    showNotification(`[Khoáng mạch] Bonus ${bonus}% chưa đạt ${rewardMode}%<br>Hiện không thể đoạt mỏ.<br>Không thực hiện được hành động nào.`, 'info')
                     break;
                 }
             }
@@ -2430,7 +2445,7 @@
             }
 
             const bodyData = `action=daily_activity_reward&stage=${stage}`;
-            
+
             try {
                 const response = await fetch(this.ajaxUrl, {
                     credentials: "include",
@@ -2445,7 +2460,7 @@
                     method: "POST",
                     mode: "cors"
                 });
-                
+
                 const data = await response.json();
                 if (data.success || data.data.message === "Đạo hữu đã nhận phần thưởng này rồi.") {
                     return true
@@ -2482,7 +2497,7 @@
                         method: "POST",
                         mode: "cors"
                     });
-                    
+
                     const data = await response.json();
                     if (data.success) {
                         showNotification(`🎉 Vòng quay phúc vận: ${data.message}`, 'success');
@@ -2689,7 +2704,7 @@
 
             .custom-script-menu-button:hover,
             .custom-script-menu-link:hover {
-                box-shadow: 0 0 15px rgba(52, 152, 219, 0.7);
+                box-shadow: 0 0 15px rgba(0, 0, 0, 0.7);
                 transform: scale(1.03);
             }
 
@@ -2945,17 +2960,6 @@
                 background-color: #2ecc71;
             }
 
-            .custom-script-message.error {
-                background-color: #e74c3c;
-            }
-
-            /* Hiệu ứng khi thông báo bị xóa */
-            @keyframes fadeOut {
-                to {
-                    opacity: 0;
-                    transform: scale(0.9);
-                }
-            }
 
             @keyframes fadeIn {
                 from {
@@ -3115,7 +3119,7 @@
                     settingsButton.title = 'Tối đa hoá sát thương: Tắt';
                 }
             };
-            
+
             hoangVucButton.addEventListener('click', async () => {
                 hoangVucButton.disabled = true;
                 hoangVucButton.textContent = 'Đang xử lý...';
@@ -3140,7 +3144,7 @@
 
             parentGroup.appendChild(settingsButton);
             parentGroup.appendChild(hoangVucButton);
-            
+
             this.updateButtonState('hoangvuc');
             updateSettingsIcon();
         }
@@ -3151,7 +3155,7 @@
             this.buttonMap.set('luanvo', luanVoButton);
             const luanVoSettingsButton = document.createElement('button');
             luanVoSettingsButton.classList.add('custom-script-hoang-vuc-settings-btn');
-            
+
             if (localStorage.getItem('luanVoAutoChallenge') === null) {
             localStorage.setItem('luanVoAutoChallenge', '1');
             }
@@ -3196,7 +3200,7 @@
             this.buttonMap.set('autorun', autorunButton);
             const autorunSettingsButton = document.createElement('button');
             autorunSettingsButton.classList.add('custom-script-hoang-vuc-settings-btn');
-            
+
             if (localStorage.getItem('autorunEnabled') === null) {
                 localStorage.setItem('autorunEnabled', '1');
             }
@@ -3207,7 +3211,7 @@
                 autorunSettingsButton.title = isEnabled ? 'Tự động chạy Autorun khi tải: Bật' : 'Tự động chạy Autorun khi tải: Tắt';
             };
             updateSettingButtonState(autorunEnabled);
-            
+
 
             autorunSettingsButton.addEventListener('click', () => {
                 autorunEnabled = !autorunEnabled;
@@ -3379,22 +3383,22 @@
                     await khoangmach.doKhoangMach();
                 }
                 finally {
-                    khoangMachButton.textContent = 'Khoáng Mạch'; 
+                    khoangMachButton.textContent = 'Khoáng Mạch';
                     this.updateButtonState('khoangmach');
                 }
             });
-            
+
             this.updateButtonState('khoangmach');
         }
 
         // Phương thức chung để tạo các nút nhiệm vụ tự động
         createAutoTaskButton(link, parentGroup) {
             const button = document.createElement('button');
-            
-            const taskName = link.isDiemDanh ? 'diemdanh' : 
-                             link.isThiLuyen ? 'thiluyen' : 
+
+            const taskName = link.isDiemDanh ? 'diemdanh' :
+                             link.isThiLuyen ? 'thiluyen' :
                              link.isPhucLoi ? 'phucloi' : null;
-            
+
             if (!taskName) return;
 
             // Lưu nút vào Map
@@ -3701,7 +3705,7 @@
             setTimeout(() => {
                 this.start();
             }, delay+1000);
-            
+
         }
 
         async doInitialTasks() {
@@ -3743,8 +3747,8 @@
             if (this.tienduyenTimeout) clearTimeout(this.tienduyenTimeout);
             this.tienduyenTimeout = setTimeout(() => this.scheduleTienDuyenCheck(), timeToNextCheck);
         }
-        
-        
+
+
         /**
          * Tạo lịch trình cho một nhiệm vụ cụ thể.
          - Ví dụ: scheduleTask('thiluyen', () => thiluyen.doThiLuyen(), this.INTERVAL_THI_LUYEN, 'thiluyenTimeout')
@@ -3833,7 +3837,7 @@
             const status = taskTracker.getTaskStatus(accountId, 'dothach');
                 const isBetPlaced = status.betplaced;
                 const isRewardClaimed = status.reward_claimed;
-                
+
                 const currentHour = parseInt(
                     new Date().toLocaleString('en-US', {
                         timeZone: 'Asia/Ho_Chi_Minh',
@@ -3901,13 +3905,13 @@
                         }
                     }
                 }
-                
+
                 timeToNextCheck = calculateTimeToNextHour(nextActionTime);
-                
+
                 // Hủy timeout cũ nếu có và thiết lập timeout mới
                 if (this.dothachTimeout) clearTimeout(this.dothachTimeout);
                 this.dothachTimeout = setTimeout(() => this.scheduleDoThach(), timeToNextCheck);
-                
+
                 console.log(`[Đổ Thạch] Lần kiểm tra tiếp theo lúc: ${new Date(Date.now() + timeToNextCheck).toLocaleTimeString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}`);
             }
 
@@ -3973,7 +3977,7 @@
 
             if (autorunEnabled) {
                 console.log('[Automation] Tự động khởi động Autorun...');
-                
+
                 // Tạo một hàm chờ để đảm bảo UI đã sẵn sàng
                 const checkStatusIcon = () => {
                     const statusIcon = document.querySelector('.custom-script-status-icon');
@@ -3995,11 +3999,181 @@
     }
 
     // ===============================================
+    // HIỆN TU VI KHOÁNG MẠCH
+    // ===============================================
+class hienTuviKhoangMach {
+    constructor() {
+        this.selfTuViCache = null;
+        this.mineImageSelector = '.mine-image';
+        this.attackButtonSelector = '.attack-btn';
+        this.currentMineUsers = []; // Sẽ lưu dữ liệu người dùng tại đây
+        this.tempObserver = null; // Biến để lưu MutationObserver tạm thời
+        this.nonce = null;
+        this.headers = {
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+            'X-Requested-With': 'XMLHttpRequest'
+        };
+    }
+    async getNonce(mineId) {
+        const htmlSource = document.documentElement.innerHTML;
+        const regex = /action:\s*'get_users_in_mine',\s*mine_id:\s*mine_id,\s*security:\s*'([a-f0-9]+)'/;
+        const match = htmlSource.match(regex);
+        return match ? match[1] : null;
+    }
+
+    async getSelfTuVi() {
+        if (this.selfTuViCache !== null) {
+            return this.selfTuViCache;
+        }
+        const el = document.querySelector('#head_manage_acc');
+        const text = el?.textContent || "";
+        const num = text.match(/\d+/);
+        if (num) {
+            this.selfTuViCache = parseInt(num[0]);
+            return this.selfTuViCache;
+        }
+        return null;
+    }
+
+    winRate(selfTuVi, opponentTuVi) {
+        if (!selfTuVi || !opponentTuVi) return 0;
+        let winChance = 50;
+        const diff = selfTuVi - opponentTuVi;
+        const ratio = diff > 0 ? selfTuVi / opponentTuVi : opponentTuVi / selfTuVi;
+        const factor = ratio >= 8 ? 1 : ratio >= 7 ? 0.9 : ratio >= 6 ? 0.8 :
+            ratio >= 5 ? 0.7 : ratio >= 4 ? 0.6 : ratio >= 3 ? 0.5 :
+            ratio >= 2 ? 0.4 : 0.3;
+        winChance += (diff / 1000) * factor;
+        return Math.max(0, Math.min(100, winChance));
+    }
+
+    upsertTuViInfo(btn, userId, opponentTuVi, rate) {
+        const cls = 'hh3d-tuvi-info';
+        const next = btn.nextElementSibling;
+        const opponentTuViText = typeof opponentTuVi === 'number' ? opponentTuVi : 'Unknown';
+
+        if (next && next.classList.contains(cls) && next.dataset.userId === String(userId)) {
+            next.innerHTML = `Tu Vi: ${opponentTuViText}<br>Winrate: ${rate}%`;
+            return;
+        }
+
+        document.querySelectorAll(`.${cls}[data-user-id="${userId}"]`).forEach(el => {
+            if (el !== next) el.remove();
+        });
+
+        const info = document.createElement('div');
+        info.className = cls;
+        info.dataset.userId = String(userId);
+        info.style.fontSize = '12px';
+        info.style.color = '#0f0';
+        info.style.marginTop = '4px';
+        info.innerHTML = `Tu Vi: ${opponentTuViText}<br>Winrate: ${rate}%`;
+        btn.insertAdjacentElement('afterend', info);
+    }
+
+    async getUsersInMine(mineId) {
+        const payload = new URLSearchParams({ action: 'get_users_in_mine', mine_id: mineId, security: this.nonce });
+        try {
+                const r = await fetch(ajaxUrl, { method: 'POST', headers: this.headers, body: payload, credentials: 'include' });
+                const d = await r.json();
+                return d.success ? d.data : (showNotification(d.message || 'Lỗi lấy thông tin người chơi.', 'error'), null);
+        } catch (e) { console.error(`${this.logPrefix} ❌ Lỗi mạng (lấy user):`, e); return null; }
+    }
+
+    async showTuViOnAttackButtons() {
+        if (!this.currentMineUsers || this.currentMineUsers.length === 0) {
+            // Không có dữ liệu, không làm gì cả
+            return;
+        }
+
+        const myTuVi = await this.getSelfTuVi();
+        if (!myTuVi) return;
+
+        const buttons = document.querySelectorAll(this.attackButtonSelector);
+        
+        for (const btn of buttons) {
+            if (btn.dataset.tuviAttached === '1') continue;
+            btn.dataset.tuviAttached = '1';
+
+            const userId = btn.getAttribute('data-user-id');
+            const opponent = this.currentMineUsers.find(u => String(u.id) === String(userId));
+            
+            if (opponent && opponent.mycred_points) {
+                const opponentTuVi = opponent.mycred_points;
+                const rate = this.winRate(myTuVi, opponentTuVi).toFixed(2);
+                this.upsertTuViInfo(btn, userId, opponentTuVi, rate);
+            } else {
+                this.upsertTuViInfo(btn, userId, 'Unknown', '0');
+            }
+        }
+    }
+
+    async handleMineClick(mineId) {
+        // Xóa luồng cũ nếu có
+        if (this.tempObserver) {
+            this.tempObserver.disconnect();
+            this.tempObserver = null;
+        }
+
+        // Bắt đầu luồng mới
+        const data = await this.getUsersInMine(mineId);
+        if (data && data.users) {
+            this.currentMineUsers = data.users;
+        } else {
+            this.currentMineUsers = [];
+        }
+        const attackButtons = document.querySelectorAll(this.attackButtonSelector);
+        if (attackButtons.length > 0) {
+            this.showTuViOnAttackButtons();
+        }
+        this.tempObserver = new MutationObserver(() => {
+            const attackButtons = document.querySelectorAll(this.attackButtonSelector);
+            if (attackButtons.length > 0) {
+                this.showTuViOnAttackButtons();
+            }
+        });
+        
+        this.tempObserver.observe(document.body, { childList: true, subtree: true });
+    }
+
+    async addEventListenersToMines() {
+        const mineImages = document.querySelectorAll(this.mineImageSelector);
+        mineImages.forEach(image => {
+            if (!image.dataset.listenerAdded) {
+                image.addEventListener('click', async (event) => {
+                    const mineId = event.currentTarget.getAttribute('data-mine-id');
+                    if (mineId) {
+                        await this.handleMineClick(mineId);
+                    }
+                });
+                image.dataset.listenerAdded = 'true';
+            }
+        });
+    }
+
+    async startUp() {
+        if (document.readyState === 'loading') {
+            await new Promise(resolve => document.addEventListener('DOMContentLoaded', resolve, { once: true }));
+        }
+        await this.getSelfTuVi();
+        this.nonce = await this.getNonce();
+        this.addEventListenersToMines();
+
+        // MutationObserver chính để thêm listener cho các mỏ mới
+        const mainObserver = new MutationObserver(() => {
+            this.addEventListenersToMines();
+        });
+        
+        mainObserver.observe(document.body, { childList: true, subtree: true });
+    }
+}
+
+    // ===============================================
     // KHỞI TẠO SCRIPT
     // ===============================================
     const taskTracker = new TaskTracker();
     const accountId = await getAccountId();
-        if (accountId) {
+    if (accountId) {
             let accountData = taskTracker.getAccountData(accountId);
             console.log(`[HH3D] ✅ Account ID: ${accountId}`);
             console.log(`[HH3D] ✅ Đã lấy dữ liệu tài khoản: ${JSON.stringify(accountData)}`);
@@ -4024,5 +4198,8 @@
     const automatic = new AutomationManager();
     new Promise(resolve => setTimeout(resolve, 2000)); // Đợi 2 giây để UI ổn định
     automatic.checkAndStart()
-    
+    if (location.pathname.includes('khoang-mach') || location.href.includes('khoang-mach')) {
+        const hienTuviKM = new hienTuviKhoangMach();
+        hienTuviKM.startUp();
+    }
 })();
