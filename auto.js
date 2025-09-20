@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     https://github.com/drtrune/hoathinh3d.script
-// @version       3.5.2
+// @version       3.5.3
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.lol/*
@@ -26,27 +26,18 @@
     let userBetStones = [];
 
     // Chỉ override khi đang ở trang Khoáng Mạch
-    const NEW_DELAY = 500; // Tăng delay lên giá trị hợp lý hơn
-    const originalSetInterval = window.setInterval;
-    window.setInterval = function(callback, delay, ...args) {
-        let actualDelay = delay;
-        try {
-            // Kiểm tra nếu callback là countdown function thông qua thuộc tính đặc biệt
-            if (typeof callback === 'function' && callback._isCountdown) {
-                actualDelay = NEW_DELAY;
-                console.log('Adjusted countdown delay:', actualDelay);
+    if (location.pathname.includes('khoang-mach') || location.href.includes('khoang-mach')) {
+        const NEW_DELAY = 400;
+        const originalSetInterval = window.setInterval;
+        window.setInterval = function(callback, delay, ...args) {
+            let actualDelay = delay;
+            if (typeof callback === 'function' && callback.toString().includes('countdown--') && callback.toString().includes('clearInterval(countdownInterval)')) {
+                actualDelay = NEW_DELAY
             }
-        } catch (e) {
-            console.error('Error in setInterval override:', e);
-        }
-        return originalSetInterval(callback, actualDelay, ...args);
-    };
+            return originalSetInterval(callback, actualDelay, ...args);
+        };
+}
 
-    // Đánh dấu countdown function
-    function createCountdownCallback(fn) {
-        fn._isCountdown = true;
-        return fn;
-    }
 
     // Cấu trúc menu
     const LINK_GROUPS = [{
