@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     https://github.com/drtrune/hoathinh3d.script
-// @version       3.5.1
+// @version       3.5.2
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.lol/*
@@ -1508,9 +1508,9 @@
         /**
          * Hàm chính để tự động hóa Hoang Vực.
          */
-        async doHoangVuc(maximizeDamage = true) {
+        async doHoangVuc() {
             console.log(`${this.logPrefix} ▶️ Bắt đầu nhiệm vụ với chiến lược: ${maximizeDamage ? 'Tối đa hóa Sát thương' : 'Không giảm Sát thương'}.`);
-
+            const maximizeDamage = localStorage.getItem('hoangvucMaximizeDamage') === 'true';
             const hoangVucUrl = `${weburl}hoang-vuc?t`;
             const { remainingAttacks, nonce } = await this.getNonceAndRemainingAttacks(hoangVucUrl);
 
@@ -3123,9 +3123,8 @@
             hoangVucButton.addEventListener('click', async () => {
                 hoangVucButton.disabled = true;
                 hoangVucButton.textContent = 'Đang xử lý...';
-                const maximizeDamage = localStorage.getItem('hoangvucMaximizeDamage') === 'true';
                 try {
-                    await hoangvuc.doHoangVuc(maximizeDamage);
+                    await hoangvuc.doHoangVuc();
                 }
                 finally {
                     hoangVucButton.textContent = 'Hoang Vực';
