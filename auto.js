@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey 
-// @version       3.5.5
+// @version       3.6
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.lol/*
@@ -283,7 +283,7 @@
 
                 // Tạo danh sách mốc reset theo thứ tự
                 const resetTimes = [
-                    new Date(now.getFullYear(), now.getMonth(), now.getDate(), 16, 0, 0, 0), // 16h hôm nay
+                    new Date(now.getFullYear(), now.getMonth(), now.getDate(), 16, 1, 0, 0), // 16h hôm nay
                     new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 1, 0, 0, 0) // 01h sáng mai
                 ];
 
@@ -2209,6 +2209,30 @@
             } catch (e) { console.error(`${this.logPrefix} ❌ Lỗi mạng (nhận thưởng):`, e); return false; }
         }
 
+
+        async attackUser(userId, mineId) {
+            const [security, security_km] = await Promise.all([
+                await this.#getNonce(/action:\s*'attack_user_in_mine'[\s\S]*?security:\s*'([a-f0-9]+)'/),
+                await this.#getNonce(/var security_km = '([a-f0-9]+)'/)
+            ]);
+            if (!security || !security_km) {
+                showNotification('Lỗi nonce (attack_user_in_mine).', 'error');
+                return false;
+            }
+            const payload = new URLSearchParams({ action: 'attack_user_in_mine',  target_user_id: userId,  mine_id: mineId, security: security, security_km: security_km,});
+            try {
+                const r = await fetch(this.ajaxUrl, { method: 'POST', headers: this.headers, body: payload, credentials: 'include' });
+                const d = await r.json();
+                if (d.success) {
+                    showNotification(d.data.message || 'Đã tấn công người chơi.', 'success');
+                    return true;
+                } else {
+                    showNotification(d.data.message || 'Lỗi tấn công người chơi.', 'error');
+                    return false;
+                }
+            } catch (e) { console.error(`${this.logPrefix} ❌ Lỗi mạng (tấn công user):`, e); return false; }
+        }
+
         async doKhoangMach() {
             const selectedMineSetting = localStorage.getItem(`khoangmach_selected_mine_${accountId}`);
             if (!selectedMineSetting) {
@@ -2226,6 +2250,8 @@
             const autoTakeover = localStorage.getItem('khoangmach_auto_takeover') === 'true';
             const autoTakeoverRotation = localStorage.getItem('khoangmach_auto_takeover_rotation') === 'true';
             const rewardMode = localStorage.getItem('khoangmach_reward_mode');
+            const outerNotification = localStorage.getItem('khoangmach_notify_outer') === 'true';
+            const weakEliminate = localStorage.getItem('khoangmach_weak_eliminate') === 'true';
 
             console.log(`${this.logPrefix} Bắt đầu quy trình cho mỏ ID: ${selectedMineInfo.id}.`);
             const mines = await this.loadMines(selectedMineInfo.type);
@@ -2257,21 +2283,36 @@
                     throw new Error('Mỏ trống trơn???');
                 }
 
-                // Kiểm tra ngoại tông
-                let outer = users.some(u => !u.lien_minh && !u.dong_mon);
-                if (outer) {
-                    if (confirm('Ngoại tông xâm nhập khoáng mạch, \n Bạn có muốn đến khoáng mạch?')){
-                        window.location.href = this.khoangMachUrl;
-                        break;
-                    }
-                }
 
                 // Kiểm tra vị trí trong mỏ
                 let myIndex = users.findIndex(u => u.id.toString() === accountId.toString());
                 if (myIndex === -1) {
                     console.log(`[Khoáng mạch] Kiểm tra vị trí. Bạn chưa vào mỏ ${targetMine.name}.`);
-                    return;
+                    return true;
                 }
+
+                // Kiểm tra ngoại tông
+                let outer = users.some(u => !u.lien_minh && !u.dong_mon);
+                if (outer && outerNotification) {
+                    // Tiêu diệt ngoại tông yếu
+                    if (weakEliminate) {
+                        for (let u of users) {
+                            if (!u.lien_minh && !u.dong_mon && users[myIndex].mycred_points > u.mycred_points * 10) {
+                                console.log(`[Khoáng mạch] Loại bỏ ngoại tông: ${u.name} (${u.id})`);
+                                await this.attackUser(u.id, targetMine.id, security, security_km);
+                                // Đợi một chút để server xử lý
+                                await new Promise(resolve => setTimeout(resolve, 4000));
+                                continue;
+                            }
+                        }
+                    }
+
+                    // Thông báo nếu vẫn còn ngoại tông
+                    if (confirm('Ngoại tông xâm nhập khoáng mạch, \n Bạn có muốn đến khoáng mạch?')){
+                        window.location.href = this.khoangMachUrl;
+                    }
+                }
+
 
                 let myInfo = users[myIndex];
                 console.log(`[Khoáng mạch] Vị trí: ${myIndex}, Tên: ${myInfo.name}, Time: ${myInfo.time_spent}`);
@@ -2326,13 +2367,15 @@
                     }
 
                     // Nếu không thể takeover và có bật buff
-                    if (useBuff && bonus > 0 && mineInfo.is_mine_owner) {
+                    if (useBuff && bonus > 20 && mineInfo.is_mine_owner) {
                         console.log(`[Khoáng mạch] Mua linh quang phù...`);
                         await this.buyBuffItem(targetMine.id);
                         // Đợi một chút để server xử lý
                         await new Promise(resolve => setTimeout(resolve, 2000));
                         continue;
                     }
+
+
 
                     // Nếu không thể làm gì, thoát khỏi vòng lặp
                     showNotification(`[Khoáng mạch] Bonus ${bonus}% chưa đạt ${rewardMode}%<br>Hiện không thể đoạt mỏ.<br>Không thực hiện được hành động nào.`, 'info')
@@ -3300,6 +3343,15 @@
                 <input type="checkbox" id="autoBuff">
                 <label for="autoBuff">Tự động mua Linh Quang Phù</label>
             </div>
+                <div class="custom-script-khoang-mach-config-group checkbox-group">
+                <input type="checkbox" id="outerNotification" checked>
+                <label for="outerNotification">Thông báo ngoại tông vào khoáng</label>
+            </div>
+            </div>
+                <div class="custom-script-khoang-mach-config-group checkbox-group">
+                <input type="checkbox" id="weakEliminate" checked>
+                <label for="weakEliminate" title="Tự động tấn công những kẻ địch có tu vi thấp hơn bạn 10 lần, không tốn lượt đánh.">Tự động diệt kẻ địch quá yếu</label>
+            </div>
             `;
 
             container.appendChild(buttonRow);
@@ -3311,7 +3363,10 @@
             const autoTakeOverCheckbox = configDiv.querySelector('#autoTakeOver');
             const autoTakeOverRotationCheckbox = configDiv.querySelector('#autoTakeOverRotation');
             const autoBuffCheckbox = configDiv.querySelector('#autoBuff');
-
+            const outerNotificationCheckbox = configDiv.querySelector('#outerNotification');
+            const weakEliminateCheckbox = configDiv.querySelector('#weakEliminate');
+            
+            outerNotificationCheckbox.checked = localStorage.getItem('khoangmach_outer_notification') === 'true';
             const keyMine = `khoangmach_selected_mine_${accountId}`;
             const savedMineSetting = localStorage.getItem(keyMine);
             if (savedMineSetting) {
@@ -3326,6 +3381,19 @@
             autoTakeOverCheckbox.checked = localStorage.getItem('khoangmach_auto_takeover') === 'true';
             autoTakeOverRotationCheckbox.checked = localStorage.getItem('khoangmach_auto_takeover_rotation') === 'true';
             autoBuffCheckbox.checked = localStorage.getItem('khoangmach_use_buff') === 'true';
+            weakEliminateCheckbox.checked = localStorage.getItem('khoangmach_weak_eliminate') === 'true';
+
+            outerNotificationCheckbox.addEventListener('change', (e) => {
+                localStorage.setItem('khoangmach_outer_notification', e.target.checked);
+                const status = e.target.checked ? 'Bật' : 'Tắt';
+                showNotification(`[Khoáng Mạch] Thông báo ngoại tông vào khoáng: ${status}`, 'info');
+            });
+
+            weakEliminateCheckbox.addEventListener('change', (e) => {
+                localStorage.setItem('khoangmach_weak_eliminate', e.target.checked);
+                const status = e.target.checked ? 'Bật' : 'Tắt';
+                showNotification(`[Khoáng Mạch] Tự động diệt kẻ địch yếu: ${status}`, 'info');
+            });
 
             let settingsOpen = false;
             khoangMachSettingsButton.addEventListener('click', () => {
@@ -3646,7 +3714,7 @@
             this.INTERVAL_THI_LUYEN = 30*60*1000 + this.delay;
             this.INTERVAL_BI_CANH = 7*60*1000 + this.delay;
             this.INTERVAL_KHOANG_MACH = 30*60*1000 + this.delay;
-            this.INTERVAL_HOAT_DONG_NGAY = 60*60*1000 + this.delay;
+            this.INTERVAL_HOAT_DONG_NGAY = 10*60*1000 + this.delay;
             this.timeoutIds = {};
             this.isRunning = false;
         }
@@ -3991,172 +4059,285 @@
     // ===============================================
     // HIỆN TU VI KHOÁNG MẠCH
     // ===============================================
-class hienTuviKhoangMach {
-    constructor() {
-        this.selfTuViCache = null;
-        this.mineImageSelector = '.mine-image';
-        this.attackButtonSelector = '.attack-btn';
-        this.currentMineUsers = []; // Sẽ lưu dữ liệu người dùng tại đây
-        this.tempObserver = null; // Biến để lưu MutationObserver tạm thời
-        this.nonce = null;
-        this.headers = {
-            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-            'X-Requested-With': 'XMLHttpRequest'
-        };
-    }
-    async getNonce(mineId) {
-        const htmlSource = document.documentElement.innerHTML;
-        const regex = /action:\s*'get_users_in_mine',\s*mine_id:\s*mine_id,\s*security:\s*'([a-f0-9]+)'/;
-        const match = htmlSource.match(regex);
-        return match ? match[1] : null;
-    }
+    class hienTuviKhoangMach {
+        constructor() {
+            this.selfTuViCache = null;
+            this.mineImageSelector = '.mine-image';
+            this.attackButtonSelector = '.attack-btn';
+            this.currentMineUsers = []; // Sẽ lưu dữ liệu người dùng tại đây
+            this.tempObserver = null; // Biến để lưu MutationObserver tạm thời
+            this.nonce = null;
+            this.headers = {
+                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                'X-Requested-With': 'XMLHttpRequest'
+            };
+            this.currentMineId = null;
+            this.tempObserverRearrange = null; // Biến để lưu MutationObserver tạm thời khi sắp xếp
 
-    async getSelfTuVi() {
-        if (this.selfTuViCache !== null) {
-            return this.selfTuViCache;
         }
-        const el = document.querySelector('#head_manage_acc');
-        const text = el?.textContent || "";
-        const num = text.match(/\d+/);
-        if (num) {
-            this.selfTuViCache = parseInt(num[0]);
-            return this.selfTuViCache;
-        }
-        return null;
-    }
-
-    winRate(selfTuVi, opponentTuVi) {
-        if (!selfTuVi || !opponentTuVi) return 0;
-        let winChance = 50;
-        const diff = selfTuVi - opponentTuVi;
-        const ratio = diff > 0 ? selfTuVi / opponentTuVi : opponentTuVi / selfTuVi;
-        const factor = ratio >= 8 ? 1 : ratio >= 7 ? 0.9 : ratio >= 6 ? 0.8 :
-            ratio >= 5 ? 0.7 : ratio >= 4 ? 0.6 : ratio >= 3 ? 0.5 :
-            ratio >= 2 ? 0.4 : 0.3;
-        winChance += (diff / 1000) * factor;
-        return Math.max(0, Math.min(100, winChance));
-    }
-
-    upsertTuViInfo(btn, userId, opponentTuVi, rate) {
-        const cls = 'hh3d-tuvi-info';
-        const next = btn.nextElementSibling;
-        const opponentTuViText = typeof opponentTuVi === 'number' ? opponentTuVi : 'Unknown';
-
-        if (next && next.classList.contains(cls) && next.dataset.userId === String(userId)) {
-            next.innerHTML = `Tu Vi: ${opponentTuViText}<br>Winrate: ${rate}%`;
-            return;
+        async getNonce() {
+            const htmlSource = document.documentElement.innerHTML;
+            const regex = /action:\s*'get_users_in_mine',\s*mine_id:\s*mine_id,\s*security:\s*'([a-f0-9]+)'/;
+            const match = htmlSource.match(regex);
+            return match ? match[1] : null;
         }
 
-        document.querySelectorAll(`.${cls}[data-user-id="${userId}"]`).forEach(el => {
-            if (el !== next) el.remove();
-        });
-
-        const info = document.createElement('div');
-        info.className = cls;
-        info.dataset.userId = String(userId);
-        info.style.fontSize = '12px';
-        info.style.color = '#0f0';
-        info.style.marginTop = '4px';
-        info.innerHTML = `Tu Vi: ${opponentTuViText}<br>Winrate: ${rate}%`;
-        btn.insertAdjacentElement('afterend', info);
-    }
-
-    async getUsersInMine(mineId) {
-        const payload = new URLSearchParams({ action: 'get_users_in_mine', mine_id: mineId, security: this.nonce });
-        try {
-                const r = await fetch(ajaxUrl, { method: 'POST', headers: this.headers, body: payload, credentials: 'include' });
-                const d = await r.json();
-                return d.success ? d.data : (showNotification(d.message || 'Lỗi lấy thông tin người chơi.', 'error'), null);
-        } catch (e) { console.error(`${this.logPrefix} ❌ Lỗi mạng (lấy user):`, e); return null; }
-    }
-
-    async showTuViOnAttackButtons() {
-        if (!this.currentMineUsers || this.currentMineUsers.length === 0) {
-            // Không có dữ liệu, không làm gì cả
-            return;
+        async getSelfTuVi() {
+            if (this.selfTuViCache !== null) {
+                return this.selfTuViCache;
+            }
+            const el = document.querySelector('#head_manage_acc');
+            const text = el?.textContent || "";
+            const num = text.match(/\d+/);
+            if (num) {
+                this.selfTuViCache = parseInt(num[0]);
+                return this.selfTuViCache;
+            }
+            return null;
         }
 
-        const myTuVi = await this.getSelfTuVi();
-        if (!myTuVi) return;
+        winRate(selfTuVi, opponentTuVi) {
+            if (!selfTuVi || !opponentTuVi) return 0;
+            let winChance = 50;
+            const diff = selfTuVi - opponentTuVi;
+            const ratio = diff > 0 ? selfTuVi / opponentTuVi : opponentTuVi / selfTuVi;
+            const factor = ratio >= 8 ? 1 : ratio >= 7 ? 0.9 : ratio >= 6 ? 0.8 :
+                ratio >= 5 ? 0.7 : ratio >= 4 ? 0.6 : ratio >= 3 ? 0.5 :
+                ratio >= 2 ? 0.4 : 0.3;
+            winChance += (diff / 1000) * factor;
+            return Math.max(0, Math.min(100, winChance));
+        }
 
-        const buttons = document.querySelectorAll(this.attackButtonSelector);
-        
-        for (const btn of buttons) {
-            if (btn.dataset.tuviAttached === '1') continue;
-            btn.dataset.tuviAttached = '1';
-
-            const userId = btn.getAttribute('data-user-id');
-            const opponent = this.currentMineUsers.find(u => String(u.id) === String(userId));
+        upsertTuViInfo(btn, userId, opponentTuVi, rate) {
+            const cls = 'hh3d-tuvi-info';
+            const next = btn.nextElementSibling;
+            const opponentTuViText = typeof opponentTuVi === 'number' ? opponentTuVi : 'Unknown';
             
-            if (opponent && opponent.mycred_points) {
-                const opponentTuVi = opponent.mycred_points;
-                const rate = this.winRate(myTuVi, opponentTuVi).toFixed(2);
-                this.upsertTuViInfo(btn, userId, opponentTuVi, rate);
+            // Tạo nội dung HTML một lần duy nhất
+            const rateNumber = parseFloat(rate);
+            let rateColor;
+            if (rateNumber < 25) {
+                rateColor = '#ff5f5f'; // Red
+            } else if (rateNumber > 75) {
+                rateColor = '#00ff00'; // Green
             } else {
-                this.upsertTuViInfo(btn, userId, 'Unknown', '0');
+                rateColor = '#ffff00ff'; // White
+            }
+
+            let displayRate = rate;
+            if (rateNumber === 0.00) {
+                displayRate = '0';
+            } else if (rateNumber === 100.00) {
+                displayRate = '100';
+            }
+
+            const innerHTMLContent = `
+                <p><strong>Tu Vi:</strong> <span style="font-weight: bold; color: #ffff00ff;">${opponentTuViText}</span></p>
+                <p><strong>Tỷ Lệ Thắng:</strong> <span style="font-weight: bold; color: ${rateColor};">${displayRate}%</span></p>
+            `;
+
+            if (next && next.classList.contains(cls) && next.dataset.userId === String(userId)) {
+                next.innerHTML = innerHTMLContent;
+                return;
+            }
+
+            document.querySelectorAll(`.${cls}[data-user-id="${userId}"]`).forEach(el => {
+                if (el !== next) el.remove();
+            });
+
+            const info = document.createElement('div');
+            info.className = cls;
+            info.dataset.userId = String(userId);
+            info.style.fontSize = '12px';
+            info.style.color = '#fff';
+            info.style.marginTop = '3px';
+            info.style.backgroundColor = 'none';
+            info.style.padding = '0px 0px';
+            info.style.border = 'none';
+            
+            // Sử dụng biến đã tạo ở trên
+            info.innerHTML = innerHTMLContent;
+            
+            btn.insertAdjacentElement('afterend', info);
+        }
+
+        async getUsersInMine(mineId) {
+            const payload = new URLSearchParams({ action: 'get_users_in_mine', mine_id: mineId, security: this.nonce });
+            try {
+                    const r = await fetch(ajaxUrl, { method: 'POST', headers: this.headers, body: payload, credentials: 'include' });
+                    const d = await r.json();
+                    return d.success ? d.data : (showNotification(d.message || 'Lỗi lấy thông tin người chơi.', 'error'), null);
+            } catch (e) { console.error(`${this.logPrefix} ❌ Lỗi mạng (lấy user):`, e); return null; }
+        }
+
+        async showTuViOnAttackButtons() {
+            if (!this.currentMineUsers || this.currentMineUsers.length === 0) {
+                // Không có dữ liệu, không làm gì cả
+                return;
+            }
+
+            const myTuVi = await this.getSelfTuVi();
+            if (!myTuVi) return;
+
+            const buttons = document.querySelectorAll(this.attackButtonSelector);
+            
+            for (const btn of buttons) {
+                if (btn.dataset.tuviAttached === '1') continue;
+                btn.dataset.tuviAttached = '1';
+
+                const userId = btn.getAttribute('data-user-id');
+                const opponent = this.currentMineUsers.find(u => String(u.id) === String(userId));
+                
+                if (opponent && opponent.mycred_points) {
+                    const opponentTuVi = opponent.mycred_points;
+                    const rate = this.winRate(myTuVi, opponentTuVi).toFixed(2);
+                    this.upsertTuViInfo(btn, userId, opponentTuVi, rate);
+                } else {
+                    this.upsertTuViInfo(btn, userId, 'Unknown', '0');
+                }
             }
         }
-    }
 
-    async handleMineClick(mineId) {
-        // Xóa luồng cũ nếu có
-        if (this.tempObserver) {
-            this.tempObserver.disconnect();
-            this.tempObserver = null;
+        async showEnemiesAndWeakElimitate(data, mineId) {
+            const currentMineUsers = data && data.users ? data.users : [];
+            let totalEnemies = 0; let totalEnemiesTuVi = 0;
+            let totalLienMinh = 0; let totalLienMinhTuVi = 0;
+            let totalDongMon = 0; let totalDongMonTuVi = 0;
+            const myTuVi = await this.getSelfTuVi();
+            const weakEliminateEnabled = localStorage.getItem('khoangmach_weak_eliminate') === 'true';
+            let isInMine = currentMineUsers.some(user => user.id.toString() === accountId.toString());
+            for (let user of currentMineUsers) {
+                if (user.dong_mon) {
+                    totalDongMon++;
+                    totalDongMonTuVi += user.mycred_points || 0;
+                } else if (user.lien_minh) {
+                    totalLienMinh++;
+                    totalLienMinhTuVi += user.mycred_points || 0;
+                } else {
+                    if (myTuVi && user.mycred_points*10 < myTuVi && weakEliminateEnabled && isInMine) {
+                        if (!(await khoangmach.attackUser(user.id, mineId))){
+                            totalEnemies++;
+                            totalEnemiesTuVi += user.mycred_points || 0;
+                        }
+                        await new Promise(resolve => setTimeout(resolve, 4000));
+                    } else {
+                        totalEnemies++;
+                        totalEnemiesTuVi += user.mycred_points || 0;
+                    }
+                }
+            }
+
+            const bonus_display = document.querySelector('#bonus-display');
+            const batquai_section = document.querySelector('#batquai-section');
+            if (bonus_display) {
+                let existingInfo = document.querySelector('.hh3d-mine-info');
+                if (!existingInfo) {
+                    existingInfo = document.createElement('div');
+                    existingInfo.className = 'hh3d-mine-info';
+                    //existingInfo.style.right = '5px';
+                    existingInfo.style.fontSize = '11px';
+                    existingInfo.style.color = '#fff';
+                    existingInfo.style.marginLeft = '-1px';
+                    existingInfo.style.backgroundColor = 'none';
+                    existingInfo.style.padding = '0px 0px';
+                    existingInfo.style.border = 'none';
+                    existingInfo.style.textAlign = 'left';
+                    existingInfo.style.fontFamily = 'Font Awesome 5 Free';
+                    bonus_display.prepend(existingInfo);
+                    bonus_display.style.display = 'block';
+                    batquai_section.style.display = 'block';
+                    const observer = new MutationObserver(() => {
+                        bonus_display.style.display = 'block';
+                        batquai_section.style.display = 'block';
+                        });
+                    observer.observe(bonus_display, { attributes: true, attributeFilter: ['style'] });
+                    observer.observe(batquai_section, { attributes: true, attributeFilter: ['style'] });
+                }
+                const kNum = (num) => {
+                    const rounded = Math.round(num / 1000);
+                    const formatted = rounded.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+                    return formatted + 'k';
+                };
+                existingInfo.innerHTML = `
+                    <h style="color: #ff5f5f;">🩸Kẻ địch: <b>${totalEnemies} (${kNum(totalEnemiesTuVi)})</b></h><br>
+                    <h style="color: #ffff00;">🤝Liên Minh: <b>${totalLienMinh} (${kNum(totalLienMinhTuVi)})</b></h><br>
+                    <h style="color: #9c59bdff;">☯️Đồng Môn: <b>${totalDongMon} (${kNum(totalDongMonTuVi)})</b></h>
+                `;
+            }
         }
 
-        // Bắt đầu luồng mới
-        const data = await this.getUsersInMine(mineId);
-        if (data && data.users) {
-            this.currentMineUsers = data.users;
-        } else {
-            this.currentMineUsers = [];
-        }
-        const attackButtons = document.querySelectorAll(this.attackButtonSelector);
-        if (attackButtons.length > 0) {
-            this.showTuViOnAttackButtons();
-        }
-        this.tempObserver = new MutationObserver(() => {
+        async handleMineClick(mineId) {
+            // Xóa luồng cũ nếu có
+            if (this.tempObserver) {
+                this.tempObserver.disconnect();
+                this.tempObserver = null;
+            }
+
+            // Bắt đầu luồng mới
+            const data = await this.getUsersInMine(mineId);
+            if (data && data.users) {
+                this.currentMineUsers = data.users;
+            } else {
+                this.currentMineUsers = [];
+            }
+            this.showEnemiesAndWeakElimitate(data, mineId);
             const attackButtons = document.querySelectorAll(this.attackButtonSelector);
             if (attackButtons.length > 0) {
                 this.showTuViOnAttackButtons();
             }
-        });
-        
-        this.tempObserver.observe(document.body, { childList: true, subtree: true });
-    }
-
-    async addEventListenersToMines() {
-        const mineImages = document.querySelectorAll(this.mineImageSelector);
-        mineImages.forEach(image => {
-            if (!image.dataset.listenerAdded) {
-                image.addEventListener('click', async (event) => {
-                    const mineId = event.currentTarget.getAttribute('data-mine-id');
-                    if (mineId) {
-                        await this.handleMineClick(mineId);
-                    }
-                });
-                image.dataset.listenerAdded = 'true';
-            }
-        });
-    }
-
-    async startUp() {
-        if (document.readyState === 'loading') {
-            await new Promise(resolve => document.addEventListener('DOMContentLoaded', resolve, { once: true }));
+            this.tempObserver = new MutationObserver(() => {
+                const attackButtons = document.querySelectorAll(this.attackButtonSelector);
+                if (attackButtons.length > 0) {
+                    this.showTuViOnAttackButtons();
+                }
+            });
+            
+            this.tempObserver.observe(document.body, { childList: true, subtree: true });
         }
-        await this.getSelfTuVi();
-        this.nonce = await this.getNonce();
-        this.addEventListenersToMines();
 
-        // MutationObserver chính để thêm listener cho các mỏ mới
-        const mainObserver = new MutationObserver(() => {
+        async addEventListenersToReloadBtn() {
+            const reloadBtn = document.querySelector('#reload-btn');
+            if (reloadBtn && !reloadBtn.dataset.listenerAdded) {
+                reloadBtn.addEventListener('click', async () => {
+                    await this.handleMineClick(this.currentMineId);
+                });
+                reloadBtn.dataset.listenerAdded = 'true';
+            }
+        }
+
+        async addEventListenersToMines() {
+            const mineImages = document.querySelectorAll(this.mineImageSelector);
+            mineImages.forEach(image => {
+                if (!image.dataset.listenerAdded) {
+                    image.addEventListener('click', async (event) => {
+                        const mineId = event.currentTarget.getAttribute('data-mine-id');
+                        if (mineId) {
+                            this.currentMineId = mineId;
+                            this.handleMineClick(mineId);
+                            this.addEventListenersToReloadBtn();
+                        }
+                    });
+                    image.dataset.listenerAdded = 'true';
+                }
+            });
+        }
+
+        async startUp() {
+            if (document.readyState === 'loading') {
+                await new Promise(resolve => document.addEventListener('DOMContentLoaded', resolve, { once: true }));
+            }
+            await this.getSelfTuVi();
+            this.nonce = await this.getNonce();
             this.addEventListenersToMines();
-        });
-        
-        mainObserver.observe(document.body, { childList: true, subtree: true });
+
+            // MutationObserver chính để thêm listener cho các mỏ mới
+            const mainObserver = new MutationObserver(() => {
+                this.addEventListenersToMines();
+            });
+            
+            mainObserver.observe(document.body, { childList: true, subtree: true });
+        }
     }
-}
 
     // ===============================================
     // KHỞI TẠO SCRIPT
