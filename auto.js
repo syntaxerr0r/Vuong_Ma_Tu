@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey 
-// @version       3.5.4
+// @version       3.5.5
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.lol/*
@@ -1528,7 +1528,7 @@
 
                     if (boss.has_pending_rewards) {
                         await this.claimHoangVucRewards(nonce);
-                        return this.doHoangVuc(maximizeDamage);
+                        return this.doHoangVuc();
                     } else if (boss.created_date === new Date().toISOString().slice(0, 10) && boss.health === boss.max_health) {
                         taskTracker.markTaskDone(accountId, 'hoangvuc');
                         return true;
