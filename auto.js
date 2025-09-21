@@ -1500,8 +1500,8 @@
          * Hàm chính để tự động hóa Hoang Vực.
          */
         async doHoangVuc() {
-            console.log(`${this.logPrefix} ▶️ Bắt đầu nhiệm vụ với chiến lược: ${maximizeDamage ? 'Tối đa hóa Sát thương' : 'Không giảm Sát thương'}.`);
             const maximizeDamage = localStorage.getItem('hoangvucMaximizeDamage') === 'true';
+            console.log(`${this.logPrefix} ▶️ Bắt đầu nhiệm vụ với chiến lược: ${maximizeDamage ? 'Tối đa hóa Sát thương' : 'Không giảm Sát thương'}.`);
             const hoangVucUrl = `${weburl}hoang-vuc?t`;
             const { remainingAttacks, nonce } = await this.getNonceAndRemainingAttacks(hoangVucUrl);
 
