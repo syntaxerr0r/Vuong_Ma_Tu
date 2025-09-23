@@ -1,23 +1,27 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey 
-// @version       3.6
+// @version       3.6.1
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
-// @match         https://hoathinh3d.lol/*
+// @match         https://hoathinh3d.gg/*
 // @run-at        document-start
 // @grant         GM_xmlhttpRequest
 // @connect       raw.githubusercontent.com
 // ==/UserScript==
 (async function() {
     'use strict';
+    //=========================================
+    //   LINK WEB, SỬA NẾU WEB ĐỔI ĐUÔI         
+    const weburl = 'https://hoathinh3d.lol/';
+    //=========================================
 
     console.log('%c[HH3D Script] Tải thành công. Đang khởi tạo UI tùy chỉnh.', 'background: #222; color: #bada55; padding: 2px 5px; border-radius: 3px;');
 
     // ===============================================
     // HÀM TIỆN ÍCH CHUNG
     // ===============================================
-    const weburl = 'https://hoathinh3d.lol/';
+    
     const ajaxUrl = weburl + 'wp-content/themes/halimmovies-child/hh3d-ajax.php';
     let questionDataCache = null;
     const QUESTION_DATA_URL = 'https://raw.githubusercontent.com/syntaxerr0r/Vuong_Ma_Tu/refs/heads/main/vandap.json';
