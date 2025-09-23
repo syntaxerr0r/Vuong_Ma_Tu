@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey 
-// @version       3.6.1
+// @version       3.6.2
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.gg/*
@@ -13,7 +13,7 @@
     'use strict';
     //=========================================
     //   LINK WEB, SỬA NẾU WEB ĐỔI ĐUÔI         
-    const weburl = 'https://hoathinh3d.lol/';
+    const weburl = 'https://hoathinh3d.gg/';
     //=========================================
 
     console.log('%c[HH3D Script] Tải thành công. Đang khởi tạo UI tùy chỉnh.', 'background: #222; color: #bada55; padding: 2px 5px; border-radius: 3px;');
