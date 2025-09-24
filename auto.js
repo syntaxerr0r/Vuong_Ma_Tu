@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey 
-// @version       3.7
+// @version       3.7.1
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.gg/*
@@ -3426,9 +3426,6 @@
                 localStorage.setItem('khoangmach_auto_run_with_autorun', e.target.checked);
                 const status = e.target.checked ? 'Bật' : 'Tắt';
                 showNotification(`Tự động chạy khi bật Autorun: ${status}`, 'info');
-                if (!e.target.checked) {
-                    automatic.removeTask('khoangmach');
-                }
             });
             
             outerNotificationCheckbox.checked = localStorage.getItem('khoangmach_outer_notification') === 'true';
