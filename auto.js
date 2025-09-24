@@ -3840,8 +3840,11 @@
             this.scheduleTask('phucloi', () => doPhucLoiDuong(), this.INTERVAL_PHUC_LOI);
             await new Promise(resolve => setTimeout(resolve, 500));
             this.INTERVAL_KHOANG_MACH = localStorage.getItem('khoangmach_check_interval') ? parseInt(localStorage.getItem('khoangmach_check_interval'))*60*1000 + this.delay : 5*60*1000 + this.delay;
-            this.scheduleTask('khoangmach', () => khoangmach.doKhoangMach(), this.INTERVAL_KHOANG_MACH);
-            await new Promise(resolve => setTimeout(resolve, 500));
+            const khoangMachAutorun = localStorage.getItem('khoangmach_auto_run_with_autorun') === 'true';
+            if (this.autorunIsRunning && khoangMachAutorun) {
+                this.scheduleTask('khoangmach', () => khoangmach.doKhoangMach(), this.INTERVAL_KHOANG_MACH);
+                await new Promise(resolve => setTimeout(resolve, 500));
+            }
             this.scheduleTask('bicanh', () => bicanh.doBiCanh(), this.INTERVAL_BI_CANH);
             await new Promise(resolve => setTimeout(resolve, 500));
             this.scheduleHoatDongNgay();
