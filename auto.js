@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey 
-// @version       3.6
+// @version       3.7
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
-// @match         https://hoathinh3d.lol/*
+// @match         https://hoathinh3d.gg/*
 // @run-at        document-start
 // @grant         GM_xmlhttpRequest
 // @connect       raw.githubusercontent.com
@@ -17,7 +17,7 @@
     // ===============================================
     // HÀM TIỆN ÍCH CHUNG
     // ===============================================
-    const weburl = 'https://hoathinh3d.lol/';
+    const weburl = 'https://hoathinh3d.gg/';
     const ajaxUrl = weburl + 'wp-content/themes/halimmovies-child/hh3d-ajax.php';
     let questionDataCache = null;
     const QUESTION_DATA_URL = 'https://raw.githubusercontent.com/syntaxerr0r/Vuong_Ma_Tu/refs/heads/main/vandap.json';
@@ -1960,6 +1960,7 @@
                 "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
                 "X-Requested-With": "XMLHttpRequest",
             };
+            this.getUsersInMineNonce = null;
         }
 
         async #getNonce(regex) {
@@ -2147,7 +2148,13 @@
 
 
         async getUsersInMine(mineId) {
-            const nonce = await this.#getNonce(/action: 'get_users_in_mine',\s*mine_id:\s*mine_id,\s*security: '([a-f0-9]+)'/);
+            let nonce = '';
+            if (this.getUsersInMineNonce) {
+                nonce = this.getUsersInMineNonce;
+            } else {
+                nonce = await this.#getNonce(/action: 'get_users_in_mine',\s*mine_id:\s*mine_id,\s*security: '([a-f0-9]+)'/);
+                this.getUsersInMineNonce = nonce; // lưu lại để dùng lần sau
+            }
             if (!nonce) { showNotification('Lỗi nonce (get_users).', 'error'); return null; }
             const payload = new URLSearchParams({ action: 'get_users_in_mine', mine_id: mineId, security: nonce });
             try {
@@ -2231,6 +2238,33 @@
                     return false;
                 }
             } catch (e) { console.error(`${this.logPrefix} ❌ Lỗi mạng (tấn công user):`, e); return false; }
+        }
+
+        async searchEnemiesById(userIds) {
+            const allMines = await this.getAllMines();
+            if (!allMines || !allMines.minesData || allMines.minesData.length === 0) {
+                showNotification('Không tải được danh sách mỏ khoáng mạch.', 'error');
+                return [];
+            }
+            
+            const allMinesIds = allMines.minesData.map(m => m.id);
+            for (let mineId of allMinesIds) {
+                const mineInfo = await this.getUsersInMine(mineId);
+                if (!mineInfo || !mineInfo.users || mineInfo.users.length === 0) continue;
+                const foundUsers = mineInfo.users.filter(u => userIds.includes(u.id.toString()));
+                if (foundUsers.length > 0) {
+                    const names = foundUsers.map(u => u.name).join(', ');
+                    const mineName = allMines.minesData.find(m => m.id === mineId)?.name || 'Unknown';
+                    showNotification(`Tìm thấy ${names} trong mỏ ${mineName}`, 'info');
+                    return foundUsers.map(u => ({
+                        ...u,
+                        mineId: mineId,
+                        mineName: allMines.minesData.find(m => m.id === mineId)?.name || 'Unknown'
+                    }))
+                    ;
+                }   
+            }
+            return [];
         }
 
         async doKhoangMach() {
@@ -3311,8 +3345,14 @@
             khoangMachSettingsButton.classList.add('custom-script-hoang-vuc-settings-btn');
             khoangMachSettingsButton.textContent = '⚙️';
 
+            const khoangMachSearchButton = document.createElement('button');
+            khoangMachSearchButton.classList.add('custom-script-hoang-vuc-settings-btn');
+            khoangMachSearchButton.textContent = '🔍';
+            khoangMachSearchButton.title = 'Tìm kẻ địch theo ID';
+            
             buttonRow.appendChild(khoangMachSettingsButton);
             buttonRow.appendChild(khoangMachButton);
+            buttonRow.appendChild(khoangMachSearchButton);
 
             const configDiv = document.createElement('div');
             configDiv.style.display = 'none';
@@ -3332,6 +3372,10 @@
                 </select>
             </div>
             <div class="custom-script-khoang-mach-config-group checkbox-group">
+                <input type="checkbox" id="autoRun" checked>
+                <label for="autoRun">Tự động chạy khi bật Autorun</label>
+            </div>
+            <div class="custom-script-khoang-mach-config-group checkbox-group">
                 <input type="checkbox" id="autoTakeOver">
                 <label for="autoTakeOver">Tự động đoạt mỏ khi chưa buff</label>
             </div>
@@ -3343,14 +3387,21 @@
                 <input type="checkbox" id="autoBuff">
                 <label for="autoBuff">Tự động mua Linh Quang Phù</label>
             </div>
-                <div class="custom-script-khoang-mach-config-group checkbox-group">
+            <div class="custom-script-khoang-mach-config-group checkbox-group">
                 <input type="checkbox" id="outerNotification" checked>
                 <label for="outerNotification">Thông báo ngoại tông vào khoáng</label>
             </div>
-            </div>
-                <div class="custom-script-khoang-mach-config-group checkbox-group">
+            <div class="custom-script-khoang-mach-config-group checkbox-group">
                 <input type="checkbox" id="weakEliminate" checked>
                 <label for="weakEliminate" title="Tự động tấn công những kẻ địch có tu vi thấp hơn bạn 10 lần, không tốn lượt đánh.">Tự động diệt kẻ địch quá yếu</label>
+            </div>
+            <div class=".custom-script-dice-roll-group">
+                <label for="checkInterval" align="left" title="Khoảng thời gian (phút) để kiểm tra và thực hiện các hành động liên quan đến Khoáng Mạch.">Thời gian kiểm tra (phút)</label>
+                <input type="number" id="checkInterval" value="5" style="width: 50px;">
+            </div>
+            <div class="custom-script-khoang-mach-config-group">
+                <label for="enemySearch" title="Tự động tìm kẻ địch">Nhập id kẻ địch để tìm:</label>
+                <input type="text" id="enemySearch" placeholder="Nhập id kẻ địch, ví dụ: 12345;23456;32456" style="width: 100%;">
             </div>
             `;
 
@@ -3365,6 +3416,20 @@
             const autoBuffCheckbox = configDiv.querySelector('#autoBuff');
             const outerNotificationCheckbox = configDiv.querySelector('#outerNotification');
             const weakEliminateCheckbox = configDiv.querySelector('#weakEliminate');
+            const autoRunCheckbox = configDiv.querySelector('#autoRun');
+            const checkIntervalInput = configDiv.querySelector('#checkInterval');
+            const enemySearchInput = configDiv.querySelector('#enemySearch');
+
+            // Khóa/mở khóa tùy chọn "Tự động chạy khi bật Autorun"
+            autoRunCheckbox.checked = localStorage.getItem('khoangmach_auto_run_with_autorun') === 'true';
+            autoRunCheckbox.addEventListener('change', (e) => {
+                localStorage.setItem('khoangmach_auto_run_with_autorun', e.target.checked);
+                const status = e.target.checked ? 'Bật' : 'Tắt';
+                showNotification(`Tự động chạy khi bật Autorun: ${status}`, 'info');
+                if (!e.target.checked) {
+                    automatic.removeTask('khoangmach');
+                }
+            });
             
             outerNotificationCheckbox.checked = localStorage.getItem('khoangmach_outer_notification') === 'true';
             const keyMine = `khoangmach_selected_mine_${accountId}`;
@@ -3377,22 +3442,25 @@
                     localStorage.removeItem(keyMine);
                 }
             }
+
+            checkIntervalInput.value = localStorage.getItem('khoangmach_check_interval') || '5';
             rewardModeSelect.value = localStorage.getItem('khoangmach_reward_mode') || 'any';
             autoTakeOverCheckbox.checked = localStorage.getItem('khoangmach_auto_takeover') === 'true';
             autoTakeOverRotationCheckbox.checked = localStorage.getItem('khoangmach_auto_takeover_rotation') === 'true';
             autoBuffCheckbox.checked = localStorage.getItem('khoangmach_use_buff') === 'true';
             weakEliminateCheckbox.checked = localStorage.getItem('khoangmach_weak_eliminate') === 'true';
+            enemySearchInput.value = localStorage.getItem(`khoangmach_enemy_search_${accountId}`) || '';
 
             outerNotificationCheckbox.addEventListener('change', (e) => {
                 localStorage.setItem('khoangmach_outer_notification', e.target.checked);
                 const status = e.target.checked ? 'Bật' : 'Tắt';
-                showNotification(`[Khoáng Mạch] Thông báo ngoại tông vào khoáng: ${status}`, 'info');
+                showNotification(`Thông báo ngoại tông vào khoáng: ${status}`, 'info');
             });
 
             weakEliminateCheckbox.addEventListener('change', (e) => {
                 localStorage.setItem('khoangmach_weak_eliminate', e.target.checked);
                 const status = e.target.checked ? 'Bật' : 'Tắt';
-                showNotification(`[Khoáng Mạch] Tự động diệt kẻ địch yếu: ${status}`, 'info');
+                showNotification(`Tự động diệt kẻ địch yếu: ${status}`, 'info');
             });
 
             let settingsOpen = false;
@@ -3434,6 +3502,24 @@
                 showNotification(`[Khoáng Mạch] Tự động mua Linh Quang Phù: ${status}`, 'info');
             });
 
+            checkIntervalInput.addEventListener('change', (e) => {
+                let value = parseInt(e.target.value, 10);
+                if (isNaN(value) || value < 1) {
+                    value = 1;
+                    e.target.value = '1';
+                } else if (value > 30) {
+                    value = 30;
+                    e.target.value = '30';
+                }
+                localStorage.setItem('khoangmach_check_interval', value.toString());
+            });
+
+            enemySearchInput.addEventListener('change', (e) => {
+                const value = e.target.value.trim();
+                localStorage.setItem(`khoangmach_enemy_search_${accountId}`, value);
+            }
+            );
+
             khoangMachButton.addEventListener('click', async () => {
                 khoangMachButton.disabled = true;
                 khoangMachButton.textContent = 'Đang xử lý...';
@@ -3443,6 +3529,23 @@
                 finally {
                     khoangMachButton.textContent = 'Khoáng Mạch';
                     this.updateButtonState('khoangmach');
+                }
+            });
+
+            khoangMachSearchButton.addEventListener('click', async () => {
+                const enemyIds = enemySearchInput.value.split(';').map(id => id.trim()).filter(id => id);
+                if (enemyIds.length === 0) {
+                    showNotification('Vui lòng nhập ít nhất một ID kẻ địch để tìm.', 'error');
+                    return;
+                }
+                khoangMachSearchButton.disabled = true;
+                khoangMachSearchButton.textContent = '🔍...';
+                try {
+                    await khoangmach.searchEnemiesById(enemyIds);
+                }
+                finally {
+                    khoangMachSearchButton.textContent = '🔍';
+                    khoangMachSearchButton.disabled = false;
                 }
             });
 
@@ -3713,7 +3816,7 @@
             this.INTERVAL_PHUC_LOI = 30*60*1000 + this.delay;
             this.INTERVAL_THI_LUYEN = 30*60*1000 + this.delay;
             this.INTERVAL_BI_CANH = 7*60*1000 + this.delay;
-            this.INTERVAL_KHOANG_MACH = 30*60*1000 + this.delay;
+            this.INTERVAL_KHOANG_MACH = localStorage.getItem('khoangmach_check_interval') ? parseInt(localStorage.getItem('khoangmach_check_interval'))*60*1000 + this.delay : 5*60*1000 + this.delay;  
             this.INTERVAL_HOAT_DONG_NGAY = 10*60*1000 + this.delay;
             this.timeoutIds = {};
             this.isRunning = false;
@@ -3736,6 +3839,7 @@
             await new Promise(resolve => setTimeout(resolve, 500));
             this.scheduleTask('phucloi', () => doPhucLoiDuong(), this.INTERVAL_PHUC_LOI);
             await new Promise(resolve => setTimeout(resolve, 500));
+            this.INTERVAL_KHOANG_MACH = localStorage.getItem('khoangmach_check_interval') ? parseInt(localStorage.getItem('khoangmach_check_interval'))*60*1000 + this.delay : 5*60*1000 + this.delay;
             this.scheduleTask('khoangmach', () => khoangmach.doKhoangMach(), this.INTERVAL_KHOANG_MACH);
             await new Promise(resolve => setTimeout(resolve, 500));
             this.scheduleTask('bicanh', () => bicanh.doBiCanh(), this.INTERVAL_BI_CANH);
@@ -4108,12 +4212,13 @@
             return Math.max(0, Math.min(100, winChance));
         }
 
-        upsertTuViInfo(btn, userId, opponentTuVi, rate) {
+        upsertTuViInfo(btn, userId, opponentTuVi, myTuVi) {
             const cls = 'hh3d-tuvi-info';
             const next = btn.nextElementSibling;
             const opponentTuViText = typeof opponentTuVi === 'number' ? opponentTuVi : 'Unknown';
             
             // Tạo nội dung HTML một lần duy nhất
+            const rate = this.winRate(myTuVi, opponentTuVi).toFixed(2);
             const rateNumber = parseFloat(rate);
             let rateColor;
             if (rateNumber < 25) {
@@ -4130,11 +4235,18 @@
             } else if (rateNumber === 100.00) {
                 displayRate = '100';
             }
-
-            const innerHTMLContent = `
+            let innerHTMLContent = '';
+            if (myTuVi <= 10 * opponentTuVi) {
+            innerHTMLContent = `
                 <p><strong>Tu Vi:</strong> <span style="font-weight: bold; color: #ffff00ff;">${opponentTuViText}</span></p>
                 <p><strong>Tỷ Lệ Thắng:</strong> <span style="font-weight: bold; color: ${rateColor};">${displayRate}%</span></p>
             `;
+            } else {
+            innerHTMLContent = `
+                <p><strong>Tu Vi:</strong> <span style="font-weight: bold; color: #ffff00ff;">${opponentTuViText}</span></p>
+                <p><span style="font-weight: bold; color: #00ff00ff;">Không tốn lượt</span></p>
+            `;
+            }
 
             if (next && next.classList.contains(cls) && next.dataset.userId === String(userId)) {
                 next.innerHTML = innerHTMLContent;
@@ -4190,21 +4302,19 @@
                 
                 if (opponent && opponent.mycred_points) {
                     const opponentTuVi = opponent.mycred_points;
-                    const rate = this.winRate(myTuVi, opponentTuVi).toFixed(2);
-                    this.upsertTuViInfo(btn, userId, opponentTuVi, rate);
+                    this.upsertTuViInfo(btn, userId, opponentTuVi, myTuVi);
                 } else {
-                    this.upsertTuViInfo(btn, userId, 'Unknown', '0');
+                    this.upsertTuViInfo(btn, userId, 'Unknow', myTuVi);
                 }
             }
         }
 
-        async showEnemiesAndWeakElimitate(data, mineId) {
+        async showTotalEnemies(data, mineId) {
             const currentMineUsers = data && data.users ? data.users : [];
             let totalEnemies = 0; let totalEnemiesTuVi = 0;
             let totalLienMinh = 0; let totalLienMinhTuVi = 0;
             let totalDongMon = 0; let totalDongMonTuVi = 0;
             const myTuVi = await this.getSelfTuVi();
-            const weakEliminateEnabled = localStorage.getItem('khoangmach_weak_eliminate') === 'true';
             let isInMine = currentMineUsers.some(user => user.id.toString() === accountId.toString());
             for (let user of currentMineUsers) {
                 if (user.dong_mon) {
@@ -4214,21 +4324,16 @@
                     totalLienMinh++;
                     totalLienMinhTuVi += user.mycred_points || 0;
                 } else {
-                    if (myTuVi && user.mycred_points*10 < myTuVi && weakEliminateEnabled && isInMine) {
-                        if (!(await khoangmach.attackUser(user.id, mineId))){
-                            totalEnemies++;
-                            totalEnemiesTuVi += user.mycred_points || 0;
-                        }
-                        await new Promise(resolve => setTimeout(resolve, 4000));
-                    } else {
                         totalEnemies++;
                         totalEnemiesTuVi += user.mycred_points || 0;
-                    }
                 }
             }
+            
 
             const bonus_display = document.querySelector('#bonus-display');
             const batquai_section = document.querySelector('#batquai-section');
+            const pagination = document.querySelector('.pagination');
+            const page_indicator = document.querySelector('#page-indicator');
             if (bonus_display) {
                 let existingInfo = document.querySelector('.hh3d-mine-info');
                 if (!existingInfo) {
@@ -4249,9 +4354,13 @@
                     const observer = new MutationObserver(() => {
                         bonus_display.style.display = 'block';
                         batquai_section.style.display = 'block';
+                        pagination.style.display = 'block';
+                        page_indicator.style.display = 'block';
                         });
                     observer.observe(bonus_display, { attributes: true, attributeFilter: ['style'] });
                     observer.observe(batquai_section, { attributes: true, attributeFilter: ['style'] });
+                    observer.observe(pagination, { attributes: true, attributeFilter: ['style'] });
+                    observer.observe(page_indicator, { attributes: true, attributeFilter: ['style'] });
                 }
                 const kNum = (num) => {
                     const rounded = Math.round(num / 1000);
@@ -4280,7 +4389,7 @@
             } else {
                 this.currentMineUsers = [];
             }
-            this.showEnemiesAndWeakElimitate(data, mineId);
+            this.showTotalEnemies(data, mineId);
             const attackButtons = document.querySelectorAll(this.attackButtonSelector);
             if (attackButtons.length > 0) {
                 this.showTuViOnAttackButtons();
