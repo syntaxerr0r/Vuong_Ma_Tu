@@ -3838,7 +3838,7 @@
             await new Promise(resolve => setTimeout(resolve, 500));
             this.INTERVAL_KHOANG_MACH = localStorage.getItem('khoangmach_check_interval') ? parseInt(localStorage.getItem('khoangmach_check_interval'))*60*1000 + this.delay : 5*60*1000 + this.delay;
             const khoangMachAutorun = localStorage.getItem('khoangmach_auto_run_with_autorun') === 'true';
-            if (this.autorunIsRunning && khoangMachAutorun) {
+            if (this.isRunning && khoangMachAutorun) {
                 this.scheduleTask('khoangmach', () => khoangmach.doKhoangMach(), this.INTERVAL_KHOANG_MACH);
                 await new Promise(resolve => setTimeout(resolve, 500));
             }
