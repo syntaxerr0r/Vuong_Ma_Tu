@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey 
-// @version       3.7.1
+// @version       3.7.2
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.gg/*
@@ -3501,9 +3501,9 @@
 
             checkIntervalInput.addEventListener('change', (e) => {
                 let value = parseInt(e.target.value, 10);
-                if (isNaN(value) || value < 1) {
-                    value = 1;
-                    e.target.value = '1';
+                if (isNaN(value) || value < 0) {
+                    value = 0;
+                    e.target.value = '0';
                 } else if (value > 30) {
                     value = 30;
                     e.target.value = '30';
