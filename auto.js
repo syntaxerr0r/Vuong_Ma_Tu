@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey 
-// @version       3.7.2
+// @version       3.8
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.gg/*
@@ -32,12 +32,12 @@
         window.setInterval = function(callback, delay, ...args) {
             let actualDelay = delay;
             if (typeof callback === 'function' && callback.toString().includes('countdown--') && callback.toString().includes('clearInterval(countdownInterval)')) {
-                actualDelay = NEW_DELAY
+                    actualDelay = NEW_DELAY
+                    showNotification('Không được đánh đến khi hết thông báo này', 'error', 5000);
             }
             return originalSetInterval(callback, actualDelay, ...args);
         };
-}
-
+    }
 
     // Cấu trúc menu
     const LINK_GROUPS = [{
@@ -1152,6 +1152,7 @@
                 const response = await this.sendApiRequest(endpoint, 'POST', nonce, {});
                 if (response && response.success && response.can_attack) {
                     if (response.remaining_attacks === 5) {
+                        await new Promise(resolve => setTimeout(resolve, 1000));
                         const rewardResponse = await this.sendApiRequest('wp-json/tong-mon/v1/claim-boss-reward', 'POST', nonce, {});
                         if (rewardResponse && rewardResponse.success) {
                             showNotification(rewardResponse.message, 'success');
@@ -1162,6 +1163,7 @@
                 }
                 // Kiểm tra trường hợp boss chết: Nhận thưởng và hiến tế
                 else if (response.success && response.message === 'Không có boss để tấn công') {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
                     const rewardResponse = await this.sendApiRequest('wp-json/tong-mon/v1/claim-boss-reward', 'POST', nonce, {});
                     if (rewardResponse && rewardResponse.success) {
                         showNotification(rewardResponse.message, 'success')
@@ -2255,7 +2257,7 @@
                 if (foundUsers.length > 0) {
                     const names = foundUsers.map(u => u.name).join(', ');
                     const mineName = allMines.minesData.find(m => m.id === mineId)?.name || 'Unknown';
-                    showNotification(`Tìm thấy ${names} trong mỏ ${mineName}`, 'info');
+                    showNotification(`Tìm thấy ${names} trong mỏ ${mineName}`, 'info', 10000);
                     return foundUsers.map(u => ({
                         ...u,
                         mineId: mineId,
@@ -2283,9 +2285,10 @@
             const useBuff = localStorage.getItem('khoangmach_use_buff') === 'true';
             const autoTakeover = localStorage.getItem('khoangmach_auto_takeover') === 'true';
             const autoTakeoverRotation = localStorage.getItem('khoangmach_auto_takeover_rotation') === 'true';
-            const rewardMode = localStorage.getItem('khoangmach_reward_mode');
-            const outerNotification = localStorage.getItem('khoangmach_notify_outer') === 'true';
-            const weakEliminate = localStorage.getItem('khoangmach_weak_eliminate') === 'true';
+            const rewardMode = localStorage.getItem('khoangmach_reward_mode') || 'any';
+            const rewardTimeSelected = localStorage.getItem('khoangmach_reward_time');
+            const rewardTime = rewardTimeSelected
+            const outerNotification = localStorage.getItem('khoangmach_outer_notification') === 'true';
 
             console.log(`${this.logPrefix} Bắt đầu quy trình cho mỏ ID: ${selectedMineInfo.id}.`);
             const mines = await this.loadMines(selectedMineInfo.type);
@@ -2328,19 +2331,6 @@
                 // Kiểm tra ngoại tông
                 let outer = users.some(u => !u.lien_minh && !u.dong_mon);
                 if (outer && outerNotification) {
-                    // Tiêu diệt ngoại tông yếu
-                    if (weakEliminate) {
-                        for (let u of users) {
-                            if (!u.lien_minh && !u.dong_mon && users[myIndex].mycred_points > u.mycred_points * 10) {
-                                console.log(`[Khoáng mạch] Loại bỏ ngoại tông: ${u.name} (${u.id})`);
-                                await this.attackUser(u.id, targetMine.id, security, security_km);
-                                // Đợi một chút để server xử lý
-                                await new Promise(resolve => setTimeout(resolve, 4000));
-                                continue;
-                            }
-                        }
-                    }
-
                     // Thông báo nếu vẫn còn ngoại tông
                     if (confirm('Ngoại tông xâm nhập khoáng mạch, \n Bạn có muốn đến khoáng mạch?')){
                         window.location.href = this.khoangMachUrl;
@@ -2353,17 +2343,31 @@
 
                 // Kiểm tra thời gian
                 if (myInfo.time_spent !== "Đạt tối đa") {
-                    const nextTime = Date.now() + Math.max(
-                        30*60*1000 - (
-                            (/phút/.test(myInfo.time_spent) ? parseInt(myInfo.time_spent)*60 : 0) +
-                            (/giây/.test(myInfo.time_spent) ? parseInt(myInfo.time_spent) : 0)
-                        ) * 1000,
-                        0
-                    );
-                    taskTracker.adjustTaskTime(accountId, 'khoangmach', nextTime);
-                    showNotification(`Khoáng mạch chưa đủ thời gian.<br>Hiện đạt: <b>${myInfo.time_spent}</b>`, 'warn');
-                    // Có thể thêm delay để tránh spam server
-                    break;
+                    const timeMatch = myInfo.time_spent.match(/(\d+)\s*phút/);
+                    const minutesSpent = timeMatch ? parseInt(timeMatch[1]) : 0;
+                    
+                    let shouldWait = false;
+                    let nextTime = null;
+                    
+                    if (rewardTimeSelected === 'max') {
+                        // Chờ đến khi đạt tối đa (30 phút)
+                        shouldWait = true;
+                        nextTime = Date.now() + Math.max(30*60*1000 - (minutesSpent * 60 * 1000), 0);
+                        showNotification(`Khoáng mạch chưa đủ thời gian.<br>Hiện đạt: <b>${myInfo.time_spent}</b><br>Cần: <b>Đạt tối đa</b>`, 'warn');
+                    } else {
+                        // Kiểm tra với thời gian cụ thể
+                        const requiredMinutes = parseInt(rewardTimeSelected);
+                        if (minutesSpent < requiredMinutes) {
+                            shouldWait = true;
+                            nextTime = Date.now() + Math.max((requiredMinutes - minutesSpent) * 60 * 1000, 0);
+                            showNotification(`Khoáng mạch chưa đủ thời gian.<br>Hiện đạt: <b>${myInfo.time_spent}</b><br>Cần: <b>${requiredMinutes} phút</b>`, 'warn');
+                        }
+                    }
+                    
+                    if (shouldWait) {
+                        taskTracker.adjustTaskTime(accountId, 'khoangmach', nextTime);
+                        break;
+                    }
                 }
 
                 // Kiểm tra trạng thái bonus
@@ -2400,8 +2404,8 @@
                         continue;
                     }
 
-                    // Nếu không thể takeover và có bật buff
-                    if (useBuff && bonus > 20 && mineInfo.is_mine_owner) {
+                    // Nếu có chọn mua buff
+                    if (useBuff && bonus > 20) {
                         console.log(`[Khoáng mạch] Mua linh quang phù...`);
                         await this.buyBuffItem(targetMine.id);
                         // Đợi một chút để server xử lý
@@ -2943,6 +2947,26 @@
                 width: 16px;
                 height: 16px;
             }
+            .custom-script-khoang-mach-config-group.number-input-group {
+                flex-direction: row;
+                align-items: center;
+                gap: 6px;
+            }
+
+            /* Hiệu ứng cho nút tìm kiếm */
+            @keyframes searchIconToggle {
+                0%, 49.9% {
+                    content: '🔍';
+                }
+                50%, 100% {
+                    content: '🔎';
+                }
+            }
+
+            .custom-script-hoang-vuc-settings-btn.searching {
+                animation: searchIconToggle 1s infinite;
+            }
+
             .custom-script-status-icon {
                 width: 10px;
                 height: 10px;
@@ -3371,6 +3395,16 @@
                 <option value="any">Bất kỳ</option>
                 </select>
             </div>
+            <div class="custom-script-khoang-mach-config-group">
+                <label for="rewardTimeSelect">Nhận thưởng khi thời gian đạt:</label>
+                <select id="rewardTimeSelect">
+                <option value="max">Đạt tối đa</option>
+                <option value="20">20 phút</option>
+                <option value="10">10 phút</option>
+                <option value="4">4 phút</option>
+                <option value="2">2 phút</option>
+                </select>
+            </div>
             <div class="custom-script-khoang-mach-config-group checkbox-group">
                 <input type="checkbox" id="autoRun" checked>
                 <label for="autoRun">Tự động chạy khi bật Autorun</label>
@@ -3391,17 +3425,17 @@
                 <input type="checkbox" id="outerNotification" checked>
                 <label for="outerNotification">Thông báo ngoại tông vào khoáng</label>
             </div>
-            <div class="custom-script-khoang-mach-config-group checkbox-group">
-                <input type="checkbox" id="weakEliminate" checked>
-                <label for="weakEliminate" title="Tự động tấn công những kẻ địch có tu vi thấp hơn bạn 10 lần, không tốn lượt đánh.">Tự động diệt kẻ địch quá yếu</label>
-            </div>
-            <div class=".custom-script-dice-roll-group">
-                <label for="checkInterval" align="left" title="Khoảng thời gian (phút) để kiểm tra và thực hiện các hành động liên quan đến Khoáng Mạch.">Thời gian kiểm tra (phút)</label>
+            <div class="custom-script-khoang-mach-config-group number-input-group">
+                <label for="checkInterval" align="left" title="Khoảng thời gian (phút) để kiểm tra và thực hiện các hành động liên quan đến Khoáng Mạch.">Thời gian kiểm tra khoáng (phút)</label>
                 <input type="number" id="checkInterval" value="5" style="width: 50px;">
             </div>
             <div class="custom-script-khoang-mach-config-group">
                 <label for="enemySearch" title="Tự động tìm kẻ địch">Nhập id kẻ địch để tìm:</label>
                 <input type="text" id="enemySearch" placeholder="Nhập id kẻ địch, ví dụ: 12345;23456;32456" style="width: 100%;">
+            </div>
+            <div class="custom-script-khoang-mach-config-group number-input-group">
+                <label for="enemySearchInterval" title="Thời gian tự động tìm kẻ địch">Tự động tìm kẻ địch mỗi (phút)</label>
+                <input type="number" id="enemySearchInterval" value="5" style="width: 50px;">
             </div>
             `;
 
@@ -3411,14 +3445,15 @@
 
             const specificMineSelect = configDiv.querySelector('#specificMineSelect');
             const rewardModeSelect = configDiv.querySelector('#rewardModeSelect');
+            const rewardTimeSelect = configDiv.querySelector('#rewardTimeSelect');
             const autoTakeOverCheckbox = configDiv.querySelector('#autoTakeOver');
             const autoTakeOverRotationCheckbox = configDiv.querySelector('#autoTakeOverRotation');
             const autoBuffCheckbox = configDiv.querySelector('#autoBuff');
             const outerNotificationCheckbox = configDiv.querySelector('#outerNotification');
-            const weakEliminateCheckbox = configDiv.querySelector('#weakEliminate');
             const autoRunCheckbox = configDiv.querySelector('#autoRun');
             const checkIntervalInput = configDiv.querySelector('#checkInterval');
             const enemySearchInput = configDiv.querySelector('#enemySearch');
+            const enemySearchIntervalInput = configDiv.querySelector('#enemySearchInterval');
 
             // Khóa/mở khóa tùy chọn "Tự động chạy khi bật Autorun"
             autoRunCheckbox.checked = localStorage.getItem('khoangmach_auto_run_with_autorun') === 'true';
@@ -3428,7 +3463,6 @@
                 showNotification(`Tự động chạy khi bật Autorun: ${status}`, 'info');
             });
             
-            outerNotificationCheckbox.checked = localStorage.getItem('khoangmach_outer_notification') === 'true';
             const keyMine = `khoangmach_selected_mine_${accountId}`;
             const savedMineSetting = localStorage.getItem(keyMine);
             if (savedMineSetting) {
@@ -3442,22 +3476,18 @@
 
             checkIntervalInput.value = localStorage.getItem('khoangmach_check_interval') || '5';
             rewardModeSelect.value = localStorage.getItem('khoangmach_reward_mode') || 'any';
+            rewardTimeSelect.value = localStorage.getItem('khoangmach_reward_time') || 'max';
             autoTakeOverCheckbox.checked = localStorage.getItem('khoangmach_auto_takeover') === 'true';
             autoTakeOverRotationCheckbox.checked = localStorage.getItem('khoangmach_auto_takeover_rotation') === 'true';
             autoBuffCheckbox.checked = localStorage.getItem('khoangmach_use_buff') === 'true';
-            weakEliminateCheckbox.checked = localStorage.getItem('khoangmach_weak_eliminate') === 'true';
             enemySearchInput.value = localStorage.getItem(`khoangmach_enemy_search_${accountId}`) || '';
+            outerNotificationCheckbox.checked = localStorage.getItem('khoangmach_outer_notification') === 'true';
+            enemySearchIntervalInput.value = localStorage.getItem('khoangmach_enemy_search_interval') || '5';
 
             outerNotificationCheckbox.addEventListener('change', (e) => {
                 localStorage.setItem('khoangmach_outer_notification', e.target.checked);
                 const status = e.target.checked ? 'Bật' : 'Tắt';
                 showNotification(`Thông báo ngoại tông vào khoáng: ${status}`, 'info');
-            });
-
-            weakEliminateCheckbox.addEventListener('change', (e) => {
-                localStorage.setItem('khoangmach_weak_eliminate', e.target.checked);
-                const status = e.target.checked ? 'Bật' : 'Tắt';
-                showNotification(`Tự động diệt kẻ địch yếu: ${status}`, 'info');
             });
 
             let settingsOpen = false;
@@ -3472,31 +3502,36 @@
                 const selectedMine = minesData.find(mine => mine.id === selectedId);
                 if (selectedMine && selectedMine.type) {
                     localStorage.setItem(keyMine, JSON.stringify({ id: selectedId, type: selectedMine.type}));
-                    showNotification(`[Khoáng Mạch] Đã chọn mỏ: ${e.target.options[e.target.selectedIndex].text}`, 'info');
+                    showNotification(`Đã chọn mỏ: ${e.target.options[e.target.selectedIndex].text}`, 'info');
                 }
             });
 
             rewardModeSelect.addEventListener('change', (e) => {
             localStorage.setItem('khoangmach_reward_mode', e.target.value);
-            showNotification(`[Khoáng Mạch] Chế độ nhận thưởng: ${e.target.options[e.target.selectedIndex].text}`, 'info');
+            showNotification(`Chế độ nhận thưởng: ${e.target.options[e.target.selectedIndex].text}`, 'info');
+            });
+
+            rewardTimeSelect.addEventListener('change', (e) => {
+                localStorage.setItem('khoangmach_reward_time', e.target.value);
+                showNotification(`Nhận thưởng khi thời gian đạt: ${e.target.options[e.target.selectedIndex].text}`, 'info');
             });
 
             autoTakeOverCheckbox.addEventListener('change', (e) => {
                 localStorage.setItem('khoangmach_auto_takeover', e.target.checked);
                 const status = e.target.checked ? 'Bật' : 'Tắt';
-                showNotification(`[Khoáng Mạch] Tự động đoạt mỏ khi chưa buff: ${status}`, 'info');
+                showNotification(`Tự động đoạt mỏ khi chưa buff: ${status}`, 'info');
             });
 
             autoTakeOverRotationCheckbox.addEventListener('change', (e) => {
                 localStorage.setItem('khoangmach_auto_takeover_rotation', e.target.checked);
                 const status = e.target.checked ? 'Bật' : 'Tắt';
-                showNotification(`[Khoáng Mạch] Tự động đoạt mỏ khi có thể: ${status}`, 'info');
+                showNotification(`Tự động đoạt mỏ khi có thể: ${status}`, 'info');
             });
 
             autoBuffCheckbox.addEventListener('change', (e) => {
                 localStorage.setItem('khoangmach_use_buff', e.target.checked);
                 const status = e.target.checked ? 'Bật' : 'Tắt';
-                showNotification(`[Khoáng Mạch] Tự động mua Linh Quang Phù: ${status}`, 'info');
+                showNotification(`Tự động mua Linh Quang Phù: ${status}`, 'info');
             });
 
             checkIntervalInput.addEventListener('change', (e) => {
@@ -3517,6 +3552,18 @@
             }
             );
 
+            enemySearchIntervalInput.addEventListener('change', (e) => {
+                let value = parseInt(e.target.value, 10);
+                if (isNaN(value) || value < 1) {
+                    value = 1;
+                    e.target.value = '1';
+                } else if (value > 30) {
+                    value = 30;
+                    e.target.value = '30';
+                }
+                localStorage.setItem('khoangmach_enemy_search_interval', value.toString());
+            });
+
             khoangMachButton.addEventListener('click', async () => {
                 khoangMachButton.disabled = true;
                 khoangMachButton.textContent = 'Đang xử lý...';
@@ -3529,24 +3576,62 @@
                 }
             });
 
+            // Xử lý sự kiện tìm kẻ địch
             khoangMachSearchButton.addEventListener('click', async () => {
                 const enemyIds = enemySearchInput.value.split(';').map(id => id.trim()).filter(id => id);
                 if (enemyIds.length === 0) {
                     showNotification('Vui lòng nhập ít nhất một ID kẻ địch để tìm.', 'error');
                     return;
                 }
-                khoangMachSearchButton.disabled = true;
-                khoangMachSearchButton.textContent = '🔍...';
-                try {
-                    await khoangmach.searchEnemiesById(enemyIds);
-                }
-                finally {
-                    khoangMachSearchButton.textContent = '🔍';
+                
+                // Kiểm tra trạng thái hiện tại của nút
+                const isSearching = khoangMachSearchButton.dataset.searching === 'true';
+                
+                if (isSearching) {
+                    // Đang tìm -> Dừng tìm
+                    if (window.enemySearchInterval) {
+                        clearInterval(window.enemySearchInterval);
+                        window.enemySearchInterval = null;
+                    }
+                    if (window.iconToggleInterval) {
+                        clearInterval(window.iconToggleInterval);
+                        window.iconToggleInterval = null;
+                    }
+                    khoangMachSearchButton.dataset.searching = 'false';
                     khoangMachSearchButton.disabled = false;
+                    khoangMachSearchButton.textContent = '🔍';
+                    khoangMachSearchButton.title = 'Tìm kẻ địch theo ID';
+                    showNotification('Đã dừng tìm kẻ địch tự động', 'info');
+                } else {
+                    // Chưa tìm -> Bắt đầu tìm
+                    khoangMachSearchButton.dataset.searching = 'true';
+                    khoangMachSearchButton.title = 'Dừng tìm kẻ địch';
+                    
+                    // Tạo hiệu ứng chuyển đổi icon - NHẸ HơN với 1 giây
+                    let isFirstIcon = true;
+                    window.iconToggleInterval = setInterval(() => {
+                        khoangMachSearchButton.textContent = isFirstIcon ? '🔎' : '🔍';
+                        isFirstIcon = !isFirstIcon;
+                    }, 1000); // 1 giây thay vì 0.5 giây → nhẹ hơn nữa
+                    
+                    // Tìm ngay lần đầu
+                    try {
+                        await khoangmach.searchEnemiesById(enemyIds);
+                    } catch (err) {
+                        console.error('[Khoáng Mạch] Lỗi khi tìm kẻ địch:', err);
+                    }
+                    
+                    // Thiết lập interval để tìm định kỳ
+                    const intervalMinutes = parseInt(enemySearchIntervalInput.value, 10) || 5;
+                    window.enemySearchInterval = setInterval(async () => {
+                        try {
+                            await khoangmach.searchEnemiesById(enemyIds);
+                        } catch (err) {
+                            console.error('[Khoáng Mạch] Lỗi khi tìm kẻ địch tự động:', err);
+                        }
+                    }, intervalMinutes * 60 * 1000);
                 }
             });
-
-            this.updateButtonState('khoangmach');
         }
 
         // Phương thức chung để tạo các nút nhiệm vụ tự động
@@ -4170,6 +4255,7 @@
             this.attackButtonSelector = '.attack-btn';
             this.currentMineUsers = []; // Sẽ lưu dữ liệu người dùng tại đây
             this.tempObserver = null; // Biến để lưu MutationObserver tạm thời
+            this.nonceGetUserInMine = null;
             this.nonce = null;
             this.headers = {
                 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
@@ -4179,11 +4265,46 @@
             this.tempObserverRearrange = null; // Biến để lưu MutationObserver tạm thời khi sắp xếp
 
         }
-        async getNonce() {
+
+        async waitForElement(selector, timeout = 15000) {
+            const found = document.querySelector(selector);
+            if (found) return Promise.resolve(found);
+            return new Promise((resolve) => {
+                const obs = new MutationObserver(() => {
+                    const el = document.querySelector(selector);
+                    if (el) {
+                        obs.disconnect();
+                        clearTimeout(timer);
+                        resolve(el);
+                    }
+                });
+                obs.observe(document.documentElement || document.body, { childList: true, subtree: true });
+                const timer = setTimeout(() => {
+                    obs.disconnect();
+                    resolve(null);
+                }, timeout);
+            });
+        }
+        async getNonceGetUserInMine() {
             const htmlSource = document.documentElement.innerHTML;
             const regex = /action:\s*'get_users_in_mine',\s*mine_id:\s*mine_id,\s*security:\s*'([a-f0-9]+)'/;
             const match = htmlSource.match(regex);
             return match ? match[1] : null;
+        }
+
+        async getNonce() {
+            if (typeof customRestNonce !== 'undefined' && customRestNonce) {
+                return customRestNonce;
+            }
+            const scripts = document.querySelectorAll('script');
+            for (const script of scripts) {
+                const match = script.innerHTML.match(/customRestNonce\s*=\s*'([a-f0-9]+)'/);
+                if (match) return match[1];
+            }
+            try {
+                const html = await fetch(weburl + '?t').then(r => r.text());
+                return html.match(/customRestNonce\s*=\s*'([a-f0-9]+)'/)?.[1] ?? null;
+            } catch { return null; }
         }
 
         async getSelfTuVi() {
@@ -4200,8 +4321,37 @@
             return null;
         }
 
+        async getProfileTier(userId) {
+            if (!userId) return null;
+            try {
+                const res = await fetch(`${weburl}/profile/${userId}/`);
+                if (!res.ok) return null;
+
+                const text = await res.text(); // phải await
+                const doc = new DOMParser().parseFromString(text, 'text/html');
+
+                const h4 = doc.querySelector('h4');
+                if (!h4) return null;
+
+                // lấy text từ <b> nếu có, nếu không fallback div/h4
+                const raw = h4.querySelector('b')?.textContent 
+                        || h4.querySelector('div')?.textContent 
+                        || h4.textContent 
+                        || "";
+
+                return raw.trim();
+            } catch (e) {
+                console.error(`${this.logPrefix} ❌ Lỗi mạng (lấy hạng):`, e);
+                return null;
+            }
+        }
+
         winRate(selfTuVi, opponentTuVi) {
-            if (!selfTuVi || !opponentTuVi) return 0;
+            if (!selfTuVi || !opponentTuVi) return -1;
+            if (typeof selfTuVi !== 'number' || typeof opponentTuVi !== 'number') return -1;
+            if (selfTuVi <= 0 || opponentTuVi <= 0) return -1;
+            if (selfTuVi >= 10 * opponentTuVi) return 100;
+            if (opponentTuVi >= 10 * selfTuVi) return 0;
             let winChance = 50;
             const diff = selfTuVi - opponentTuVi;
             const ratio = diff > 0 ? selfTuVi / opponentTuVi : opponentTuVi / selfTuVi;
@@ -4212,7 +4362,7 @@
             return Math.max(0, Math.min(100, winChance));
         }
 
-        upsertTuViInfo(btn, userId, opponentTuVi, myTuVi) {
+        async upsertTuViInfo(btn, userId, opponentTuVi, myTuVi) {
             const cls = 'hh3d-tuvi-info';
             const next = btn.nextElementSibling;
             const opponentTuViText = typeof opponentTuVi === 'number' ? opponentTuVi : 'Unknown';
@@ -4221,7 +4371,10 @@
             const rate = this.winRate(myTuVi, opponentTuVi).toFixed(2);
             const rateNumber = parseFloat(rate);
             let rateColor;
-            if (rateNumber < 25) {
+            if (rateNumber === -1) {
+                rateColor = '#808080'; // Grey
+            }
+                else if (rateNumber < 25) {
                 rateColor = '#ff5f5f'; // Red
             } else if (rateNumber > 75) {
                 rateColor = '#00ff00'; // Green
@@ -4234,6 +4387,8 @@
                 displayRate = '0';
             } else if (rateNumber === 100.00) {
                 displayRate = '100';
+            } else if (rateNumber === -1) {
+                displayRate = 'Không rõ';
             }
             let innerHTMLContent = '';
             if (myTuVi <= 10 * opponentTuVi) {
@@ -4273,8 +4428,35 @@
             btn.insertAdjacentElement('afterend', info);
         }
 
+        async upsertTierInfo(btn, userId) {
+            const cls = 'hh3d-tuvi-info';
+            const next = btn.nextElementSibling;
+            const tierText = await this.getProfileTier(userId);
+            console.log(`UserID: ${userId}, Tier: ${tierText}`);
+            if (!tierText) return;
+            if (next && next.classList.contains(cls) && next.dataset.userId === String(userId)) {
+                next.innerHTML = `<p><strong>Hạng:</strong> <span style="font-weight: bold; color: #ffff00ff;">${tierText}</span></p>`;
+                return;
+            }
+            
+            document.querySelectorAll(`.${cls}[data-user-id="${userId}"]`).forEach(el => {
+                if (el !== next) el.remove();
+            });
+            const info = document.createElement('div');
+            info.className = cls;
+            info.dataset.userId = String(userId);
+            info.style.fontSize = '12px';
+            info.style.color = '#fff';
+            info.style.marginTop = '3px';
+            info.style.backgroundColor = 'none';
+            info.style.padding = '0px 0px';
+            info.style.border = 'none';
+            info.innerHTML = `<p><strong>Hạng:</strong> <span style="font-weight: bold; color: #ffff00ff;">${tierText}</span></p>`;
+            btn.insertAdjacentElement('afterend', info);
+        }
+
         async getUsersInMine(mineId) {
-            const payload = new URLSearchParams({ action: 'get_users_in_mine', mine_id: mineId, security: this.nonce });
+            const payload = new URLSearchParams({ action: 'get_users_in_mine', mine_id: mineId, security: this.nonceGetUserInMine });
             try {
                     const r = await fetch(ajaxUrl, { method: 'POST', headers: this.headers, body: payload, credentials: 'include' });
                     const d = await r.json();
@@ -4282,50 +4464,39 @@
             } catch (e) { console.error(`${this.logPrefix} ❌ Lỗi mạng (lấy user):`, e); return null; }
         }
 
-        async showTuViOnAttackButtons() {
-            if (!this.currentMineUsers || this.currentMineUsers.length === 0) {
-                // Không có dữ liệu, không làm gì cả
-                return;
+        async  getTuVi(userId) {
+            if (!this.nonce) {
+                this.nonce = await this.getNonce();
             }
-
-            const myTuVi = await this.getSelfTuVi();
-            if (!myTuVi) return;
-
-            const buttons = document.querySelectorAll(this.attackButtonSelector);
-            
-            for (const btn of buttons) {
-                if (btn.dataset.tuviAttached === '1') continue;
-                btn.dataset.tuviAttached = '1';
-
-                const userId = btn.getAttribute('data-user-id');
-                const opponent = this.currentMineUsers.find(u => String(u.id) === String(userId));
-                
-                if (opponent && opponent.mycred_points) {
-                    const opponentTuVi = opponent.mycred_points;
-                    this.upsertTuViInfo(btn, userId, opponentTuVi, myTuVi);
-                } else {
-                    this.upsertTuViInfo(btn, userId, 'Unknow', myTuVi);
-                }
-            }
+            const nonce = this.nonce;
+            if (!nonce) return null;
+            try {
+                const res = await fetch(`${weburl}/wp-json/luan-vo/v1/search-users`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json", "X-WP-Nonce": nonce },
+                    body: JSON.stringify({ query: String(userId), page: 1 }),
+                    credentials: "include",
+                    mode: "cors"
+                });
+                return res.ok ? (await res.json())?.data?.users?.[0]?.points ?? null : null;
+            } catch { return null; }
         }
 
-        async showTotalEnemies(data, mineId) {
+        async showTotalEnemies(mineId) {
+            const data = await this.getUsersInMine(mineId);
             const currentMineUsers = data && data.users ? data.users : [];
-            let totalEnemies = 0; let totalEnemiesTuVi = 0;
-            let totalLienMinh = 0; let totalLienMinhTuVi = 0;
-            let totalDongMon = 0; let totalDongMonTuVi = 0;
+            let totalEnemies = 0;
+            let totalLienMinh = 0;
+            let totalDongMon = 0;
             const myTuVi = await this.getSelfTuVi();
             let isInMine = currentMineUsers.some(user => user.id.toString() === accountId.toString());
             for (let user of currentMineUsers) {
                 if (user.dong_mon) {
                     totalDongMon++;
-                    totalDongMonTuVi += user.mycred_points || 0;
                 } else if (user.lien_minh) {
                     totalLienMinh++;
-                    totalLienMinhTuVi += user.mycred_points || 0;
                 } else {
                         totalEnemies++;
-                        totalEnemiesTuVi += user.mycred_points || 0;
                 }
             }
             
@@ -4362,53 +4533,20 @@
                     observer.observe(pagination, { attributes: true, attributeFilter: ['style'] });
                     observer.observe(page_indicator, { attributes: true, attributeFilter: ['style'] });
                 }
-                const kNum = (num) => {
-                    const rounded = Math.round(num / 1000);
-                    const formatted = rounded.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-                    return formatted + 'k';
-                };
+           
                 existingInfo.innerHTML = `
-                    <h style="color: #ff5f5f;">🩸Kẻ địch: <b>${totalEnemies} (${kNum(totalEnemiesTuVi)})</b></h><br>
-                    <h style="color: #ffff00;">🤝Liên Minh: <b>${totalLienMinh} (${kNum(totalLienMinhTuVi)})</b></h><br>
-                    <h style="color: #9c59bdff;">☯️Đồng Môn: <b>${totalDongMon} (${kNum(totalDongMonTuVi)})</b></h>
+                    <h style="color: #ff5f5f;">🩸Kẻ địch: <b>${totalEnemies}</b></h><br>
+                    <h style="color: #ffff00;">🤝Liên Minh: <b>${totalLienMinh}</b></h><br>
+                    <h style="color: #9c59bdff;">☯️Đồng Môn: <b>${totalDongMon}</b></h>
                 `;
             }
         }
 
-        async handleMineClick(mineId) {
-            // Xóa luồng cũ nếu có
-            if (this.tempObserver) {
-                this.tempObserver.disconnect();
-                this.tempObserver = null;
-            }
-
-            // Bắt đầu luồng mới
-            const data = await this.getUsersInMine(mineId);
-            if (data && data.users) {
-                this.currentMineUsers = data.users;
-            } else {
-                this.currentMineUsers = [];
-            }
-            this.showTotalEnemies(data, mineId);
-            const attackButtons = document.querySelectorAll(this.attackButtonSelector);
-            if (attackButtons.length > 0) {
-                this.showTuViOnAttackButtons();
-            }
-            this.tempObserver = new MutationObserver(() => {
-                const attackButtons = document.querySelectorAll(this.attackButtonSelector);
-                if (attackButtons.length > 0) {
-                    this.showTuViOnAttackButtons();
-                }
-            });
-            
-            this.tempObserver.observe(document.body, { childList: true, subtree: true });
-        }
-
-        async addEventListenersToReloadBtn() {
+        async addEventListenersToReloadBtn(mineId) {
             const reloadBtn = document.querySelector('#reload-btn');
             if (reloadBtn && !reloadBtn.dataset.listenerAdded) {
                 reloadBtn.addEventListener('click', async () => {
-                    await this.handleMineClick(this.currentMineId);
+                    this.showTotalEnemies(mineId);
                 });
                 reloadBtn.dataset.listenerAdded = 'true';
             }
@@ -4421,9 +4559,8 @@
                     image.addEventListener('click', async (event) => {
                         const mineId = event.currentTarget.getAttribute('data-mine-id');
                         if (mineId) {
-                            this.currentMineId = mineId;
-                            this.handleMineClick(mineId);
-                            this.addEventListenersToReloadBtn();
+                            this.showTotalEnemies(mineId);
+                            this.addEventListenersToReloadBtn(mineId);
                         }
                     });
                     image.dataset.listenerAdded = 'true';
@@ -4431,14 +4568,64 @@
             });
         }
 
+        async showTuVi(myTuVi) {
+            if (!myTuVi) return;
+
+            const buttons = document.querySelectorAll('.attack-btn');
+            for (const btn of buttons) {
+                if (btn.dataset.tuviAttached === '1') continue;
+                btn.dataset.tuviAttached = '1';
+
+                const userId = btn.getAttribute('data-user-id');
+                if (!userId) continue;
+
+                try {
+                    const opponentTuVi = await this.getTuVi(userId);
+                    if (opponentTuVi) {
+                        const rate = this.winRate(myTuVi, opponentTuVi).toFixed(2);
+                        this.upsertTuViInfo(btn, userId, opponentTuVi, myTuVi);
+                    } else {
+                        this.upsertTierInfo(btn, userId);
+                    }
+                } catch (e) {
+                    console.error('getTuVi error', e);
+                }
+
+                const mineId = btn.getAttribute('data-mine-id');
+                if (mineId && mineId !== this.currentMineId) {
+                    this.currentMineId = mineId;
+                    this.showTotalEnemies(mineId);
+                    this.addEventListenersToReloadBtn(mineId);
+                }
+                // nghỉ 300ms tránh spam
+                await new Promise(r => setTimeout(r, 300));
+            }
+        }
+
         async startUp() {
             if (document.readyState === 'loading') {
                 await new Promise(resolve => document.addEventListener('DOMContentLoaded', resolve, { once: true }));
             }
-            await this.getSelfTuVi();
+            this.nonceGetUserInMine = await this.getNonceGetUserInMine();
             this.nonce = await this.getNonce();
-            this.addEventListenersToMines();
+            await this.waitForElement('#head_manage_acc', 15000);
 
+            const myTuVi = await this.getSelfTuVi();
+            if (myTuVi) {
+                await this.showTuVi(myTuVi);
+            }
+
+            // quan sát DOM để cập nhật khi các nút attack xuất hiện hoặc nội dung thay đổi
+            let __timeout = null;
+            const observer = new MutationObserver(() => {
+                clearTimeout(__timeout);
+                __timeout = setTimeout(async () => {
+                    await this.showTuVi(myTuVi);
+                }, 200);
+            });
+            observer.observe(document.body, { childList: true, subtree: true });
+            
+            this.addEventListenersToMines();
             // MutationObserver chính để thêm listener cho các mỏ mới
             const mainObserver = new MutationObserver(() => {
                 this.addEventListenersToMines();
