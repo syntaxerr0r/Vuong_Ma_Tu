@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey 
-// @version       3.8
+// @version       3.8.1
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.gg/*
@@ -2258,6 +2258,7 @@
                     const names = foundUsers.map(u => u.name).join(', ');
                     const mineName = allMines.minesData.find(m => m.id === mineId)?.name || 'Unknown';
                     showNotification(`Tìm thấy ${names} trong mỏ ${mineName}`, 'info', 10000);
+                    navigator.vibrate([200, 100, 200]);
                     return foundUsers.map(u => ({
                         ...u,
                         mineId: mineId,
