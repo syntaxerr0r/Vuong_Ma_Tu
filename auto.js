@@ -3579,7 +3579,7 @@
 
             // Xử lý sự kiện tìm kẻ địch
             khoangMachSearchButton.addEventListener('click', async () => {
-                navigtor.vibrate([200,100,200]);
+                navigator.vibrate([200,100,200]);
                 const enemyIds = enemySearchInput.value.split(';').map(id => id.trim()).filter(id => id);
                 if (enemyIds.length === 0) {
                     showNotification('Vui lòng nhập ít nhất một ID kẻ địch để tìm.', 'error');
