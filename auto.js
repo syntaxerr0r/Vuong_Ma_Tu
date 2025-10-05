@@ -137,6 +137,7 @@
         const u = new SpeechSynthesisUtterance(text);
         u.voice = voice;
         u.lang = lang;
+        u.rate = 0.8; // tốc độ nói
         u.onstart = () => console.log(`[TTS] ▶️ Bắt đầu đọc (${lang}): ${text}`);
         u.onend = () => console.log("[TTS] ✅ Hoàn tất đọc");
         u.onerror = e => console.error("[TTS] ❌ Lỗi:", e.error);
@@ -2308,14 +2309,14 @@
                     const names = foundUsers.map(u => u.name).join(', ');
                     const mineName = allMines.minesData.find(m => m.id === mineId)?.name || 'Unknown';
                     showNotification(`Tìm thấy ${names} trong mỏ ${mineName}`, 'info', 10000);
-                    speak(`Tìm thấy địch trong mỏ ${mineName}`, 'Enemy founded');
+                    await speak(`Tìm thấy địch trong mỏ ${mineName}`, 'Enemy founded');
                     return foundUsers.map(u => ({
                         ...u,
                         mineId: mineId,
                         mineName: allMines.minesData.find(m => m.id === mineId)?.name || 'Unknown'
                     }))
                 }
-                await this.delay(500); // tránh spam   
+                await new Promise(r => setTimeout(r, 500)); // đợi 0.8s để tránh spam
             }
             return [];
         }
