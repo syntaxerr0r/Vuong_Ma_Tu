@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey 
-// @version       3.8.1
+// @version       3.8.2
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.gg/*
@@ -27,7 +27,7 @@
 
     // Chỉ override khi đang ở trang Khoáng Mạch
     if (location.pathname.includes('khoang-mach') || location.href.includes('khoang-mach')) {
-        const NEW_DELAY = 400;
+        const NEW_DELAY = 50;
         const originalSetInterval = window.setInterval;
         window.setInterval = function(callback, delay, ...args) {
             let actualDelay = delay;
@@ -98,6 +98,51 @@
         style.type = 'text/css';
         style.appendChild(document.createTextNode(css));
         document.head.appendChild(style);
+    }
+    async function speak(textVN, textEN) {
+        console.log("[TTS] Bắt đầu khởi tạo speak()");
+        await new Promise(r => setTimeout(r, 300)); // đợi hệ thống load voice
+        let voices = speechSynthesis.getVoices();
+        if (!voices.length) {
+        console.log("[TTS] Chưa có voice, chờ event voiceschanged...");
+        await new Promise(res => {
+            const onChange = () => {
+            voices = speechSynthesis.getVoices();
+            if (voices.length) {
+                speechSynthesis.removeEventListener("voiceschanged", onChange);
+                res();
+            }
+            };
+            speechSynthesis.addEventListener("voiceschanged", onChange);
+        });
+        }
+
+        voices = speechSynthesis.getVoices();
+        console.log(`[TTS] Tổng số voice: ${voices.length}`);
+        voices.forEach(v => console.log(`[VOICE] ${v.name} | ${v.lang}`));
+
+        let voice = voices.find(v => /vi[-_]?VN/i.test(v.lang));
+        let lang = "vi-VN";
+        let text = textVN;
+
+        if (!voice) {
+        console.log("[TTS] Không có voice tiếng Việt, dùng tiếng Anh");
+        voice = voices.find(v => /en[-_]?US/i.test(v.lang)) || voices[0];
+        lang = "en-US";
+        text = textEN;
+        }
+
+        if (!voice) return console.error("[TTS] ❌ Không tìm thấy voice khả dụng");
+
+        const u = new SpeechSynthesisUtterance(text);
+        u.voice = voice;
+        u.lang = lang;
+        u.onstart = () => console.log(`[TTS] ▶️ Bắt đầu đọc (${lang}): ${text}`);
+        u.onend = () => console.log("[TTS] ✅ Hoàn tất đọc");
+        u.onerror = e => console.error("[TTS] ❌ Lỗi:", e.error);
+
+        speechSynthesis.cancel();
+        speechSynthesis.speak(u);
     }
 
     //Lấy Nonce
@@ -1117,12 +1162,14 @@
             }
 
             // Bước 2: Kiểm tra thời gian hồi
+            await new Promise(resolve => setTimeout(resolve, 500));
             const canAttack = await this.checkAttackCooldown(nonce);
             if (!canAttack) {
                 return true;
             }
 
             // Bước 3: Tấn công boss Bí Cảnh
+            await new Promise(resolve => setTimeout(resolve, 500));
             await this.attackBoss(nonce);
         }
 
@@ -1151,7 +1198,7 @@
             try {
                 const response = await this.sendApiRequest(endpoint, 'POST', nonce, {});
                 if (response && response.success && response.can_attack) {
-                    if (response.remaining_attacks === 5) {
+                    if (response.remaining_attacks === 5 || response.remaining_attacks === 1) {
                         await new Promise(resolve => setTimeout(resolve, 1000));
                         const rewardResponse = await this.sendApiRequest('wp-json/tong-mon/v1/claim-boss-reward', 'POST', nonce, {});
                         if (rewardResponse && rewardResponse.success) {
@@ -1461,6 +1508,7 @@
                 if (changeData.success) {
                     myElement = changeData.data.new_element;
                     console.log(`${this.logPrefix} 🔄 Đổi lần ${changeAttempts} -> ${myElement}`);
+                    await new Promise(resolve => setTimeout(resolve, 500));
                 } else {
                     console.error(`${this.logPrefix} ❌ Lỗi khi đổi:`, changeData.message || 'Không xác định.');
                     return myElement;
@@ -1555,7 +1603,8 @@
                     } else {
                         console.log(`${this.logPrefix} ✅ Nguyên tố hiện tại (${myElement}) đã phù hợp. Không cần đổi.`);
                     }
-
+                    // Cập nhật số lượt đánh còn lại
+                    await new Promise(resolve => setTimeout(resolve, 500));
                     const timePayload = new URLSearchParams();
                     timePayload.append('action', 'get_next_attack_time');
                     const timeResponse = await fetch(this.ajaxUrl, {
@@ -1568,6 +1617,7 @@
 
                     if (nextAttackTime.success && Date.now() >= nextAttackTime.data) {
                         // Thực hiện tấn công boss Hoang Vực, nếu thành công và còn 1 lượt tấn công thì đánh dấu nhiệm vụ hoàn thành
+                        await new Promise(resolve => setTimeout(resolve, 500));
                         if (await this.attackHoangVucBoss(boss.id, nonce)){
                             taskTracker.adjustTaskTime(accountId, 'hoangvuc', timePlus('15:02'));   //--------- 15 phút cho lần sau -----------//
                             if (this.remainingAttacks <= 1) {
@@ -2258,14 +2308,14 @@
                     const names = foundUsers.map(u => u.name).join(', ');
                     const mineName = allMines.minesData.find(m => m.id === mineId)?.name || 'Unknown';
                     showNotification(`Tìm thấy ${names} trong mỏ ${mineName}`, 'info', 10000);
-                    navigator.vibrate([200, 100, 200]);
+                    speak(`Tìm thấy địch trong mỏ ${mineName}`, 'Enemy founded');
                     return foundUsers.map(u => ({
                         ...u,
                         mineId: mineId,
                         mineName: allMines.minesData.find(m => m.id === mineId)?.name || 'Unknown'
                     }))
-                    ;
-                }   
+                }
+                await this.delay(500); // tránh spam   
             }
             return [];
         }
@@ -2313,6 +2363,7 @@
             // Bắt đầu vòng lặp để kiểm tra và thực hiện tác vụ liên tục
             while (true) {
                 // Kiểm tra thông tin trong mỏ
+                await this.delay(1000); // Đợi 1 giây để tránh spam quá nhanh
                 let mineInfo = await this.getUsersInMine(targetMine.id);
                 if (!mineInfo) throw new Error('Lỗi lấy thông tin chi tiết trong mỏ');
                 const users = mineInfo.users || [];
@@ -2376,9 +2427,9 @@
                 let canClaim = false;
                 if (rewardMode === "any") {
                     canClaim = true;
-                } else if (rewardMode === ">0" && bonus > 0) {
+                } else if (rewardMode === "20" && bonus >= 20) {
                     canClaim = true;
-                } else if (rewardMode === ">50" && bonus > 50) {
+                } else if (rewardMode === "100" && bonus >= 100) {
                     canClaim = true;
                 } else if (rewardMode === "110" && bonus === 110) {
                     canClaim = true;
@@ -2393,6 +2444,7 @@
 
                     // Nếu có thể, thử takeover trước (option đoạt mỏ khi chưa buff)
                     if (autoTakeover && mineInfo.can_takeover) {
+                        await this.delay(500);
                         console.log(`[Khoáng mạch] Thử đoạt mỏ ${targetMine.id}...`);
                         await this.takeOverMine(targetMine.id);
                         continue;
@@ -2400,6 +2452,7 @@
 
                     // Nếu có thể, thử takeover trước (option đoạt mỏ bất kể buff)
                     if (autoTakeoverRotation && mineInfo.can_takeover) {
+                        await this.delay(500);
                         console.log(`[Khoáng mạch] Thử đoạt mỏ ${targetMine.id}...`);
                         await this.takeOverMine(targetMine.id);
                         continue;
@@ -2407,10 +2460,11 @@
 
                     // Nếu có chọn mua buff
                     if (useBuff && bonus > 20) {
+                        await this.delay(500);
                         console.log(`[Khoáng mạch] Mua linh quang phù...`);
                         await this.buyBuffItem(targetMine.id);
                         // Đợi một chút để server xử lý
-                        await new Promise(resolve => setTimeout(resolve, 2000));
+                        await new Promise(resolve => setTimeout(resolve, 1000));
                         continue;
                     }
 
@@ -2498,6 +2552,7 @@
                         showNotification(`Nhận lì xì phòng cưới ${room.wedding_room_id} được <b>${liXi.data.amount} ${liXi.data.name}</b>!`, 'success')
                     }
                 }
+                await new Promise(r => setTimeout(r, 1000)); // chờ 1 giây tránh spam
             }
         }
     }
@@ -2578,11 +2633,17 @@
                         if (remainingSpins === 0) {
                             return true;
                         }
+                    } else if (data.message === "Đạo hữu đã hết lượt quay hôm nay.") {
+                        return true;
+                    } else {
+                        showNotification(`❌ Lỗi khi quay vòng quay phúc vận: ${data.message}`, 'error');
+                        return false;
                     }
                 } catch (error) {
                     console.error("Lỗi khi spin:", error);
                     return false;
                 }
+                await new Promise(r => setTimeout(r, 1000)); // chờ 1.5 giây tránh spam
             } while (remainingSpins > 0);
         }
 
@@ -3391,8 +3452,8 @@
                 <label for="rewardModeSelect">Chế độ Nhận Thưởng:</label>
                 <select id="rewardModeSelect">
                 <option value="110">110%</option>
-                <option value=">50">> 50%</option>
-                <option value=">0">> 0%</option>
+                <option value="100">100%</option>
+                <option value="20">20%</option>
                 <option value="any">Bất kỳ</option>
                 </select>
             </div>
@@ -3579,7 +3640,7 @@
 
             // Xử lý sự kiện tìm kẻ địch
             khoangMachSearchButton.addEventListener('click', async () => {
-                navigator.vibrate([200,100,200]);
+
                 const enemyIds = enemySearchInput.value.split(';').map(id => id.trim()).filter(id => id);
                 if (enemyIds.length === 0) {
                     showNotification('Vui lòng nhập ít nhất một ID kẻ địch để tìm.', 'error');
@@ -3915,24 +3976,24 @@
             this.scheduleTienDuyenCheck();
             // Đổ thạch
             this.scheduleDoThach();
-            await new Promise(resolve => setTimeout(resolve, 500));
+            await new Promise(resolve => setTimeout(resolve, 1000));
             // Các tác vụ khác
             this.scheduleTask('hoangvuc', () => hoangvuc.doHoangVuc(), this.INTERVAL_HOANG_VUC);
-            await new Promise(resolve => setTimeout(resolve, 500));
+            await new Promise(resolve => setTimeout(resolve, 1000));
             this.scheduleTask('thiluyen', () => doThiLuyenTongMon(), this.INTERVAL_THI_LUYEN);
-            await new Promise(resolve => setTimeout(resolve, 500));
+            await new Promise(resolve => setTimeout(resolve, 1000));
             this.scheduleTask('phucloi', () => doPhucLoiDuong(), this.INTERVAL_PHUC_LOI);
-            await new Promise(resolve => setTimeout(resolve, 500));
+            await new Promise(resolve => setTimeout(resolve, 1000));
             this.INTERVAL_KHOANG_MACH = localStorage.getItem('khoangmach_check_interval') ? parseInt(localStorage.getItem('khoangmach_check_interval'))*60*1000 + this.delay : 5*60*1000 + this.delay;
             const khoangMachAutorun = localStorage.getItem('khoangmach_auto_run_with_autorun') === 'true';
             if (this.isRunning && khoangMachAutorun) {
                 this.scheduleTask('khoangmach', () => khoangmach.doKhoangMach(), this.INTERVAL_KHOANG_MACH);
-                await new Promise(resolve => setTimeout(resolve, 500));
+                await new Promise(resolve => setTimeout(resolve, 1000));
             }
             this.scheduleTask('bicanh', () => bicanh.doBiCanh(), this.INTERVAL_BI_CANH);
-            await new Promise(resolve => setTimeout(resolve, 500));
+            await new Promise(resolve => setTimeout(resolve, 1000));
             this.scheduleHoatDongNgay();
-            await new Promise(resolve => setTimeout(resolve, 500));
+            await new Promise(resolve => setTimeout(resolve, 1000));
             this.scheduleLuanVo();
             this.selfSchedule();
         }
@@ -4326,7 +4387,7 @@
         async getProfileTier(userId) {
             if (!userId) return null;
             try {
-                const res = await fetch(`${weburl}/profile/${userId}/`);
+                const res = await fetch(`${weburl}profile/${userId}/`);
                 if (!res.ok) return null;
 
                 const text = await res.text(); // phải await
@@ -4343,7 +4404,7 @@
 
                 return raw.trim();
             } catch (e) {
-                console.error(`${this.logPrefix} ❌ Lỗi mạng (lấy hạng):`, e);
+                console.error(`${this.logPrefix} ❌ Lỗi mạng (lấy cảnh giới):`, e);
                 return null;
             }
         }
@@ -4437,7 +4498,7 @@
             console.log(`UserID: ${userId}, Tier: ${tierText}`);
             if (!tierText) return;
             if (next && next.classList.contains(cls) && next.dataset.userId === String(userId)) {
-                next.innerHTML = `<p><strong>Hạng:</strong> <span style="font-weight: bold; color: #ffff00ff;">${tierText}</span></p>`;
+                next.innerHTML = `<p><strong>Cảnh giới:</strong> <span style="font-weight: bold; color: #ffff00ff;">${tierText}</span></p>`;
                 return;
             }
             
@@ -4453,7 +4514,7 @@
             info.style.backgroundColor = 'none';
             info.style.padding = '0px 0px';
             info.style.border = 'none';
-            info.innerHTML = `<p><strong>Hạng:</strong> <span style="font-weight: bold; color: #ffff00ff;">${tierText}</span></p>`;
+            info.innerHTML = `<p><strong>Cảnh giới:</strong> <span style="font-weight: bold; color: #ffff00ff;">${tierText}</span></p>`;
             btn.insertAdjacentElement('afterend', info);
         }
 
@@ -4599,8 +4660,8 @@
                     this.showTotalEnemies(mineId);
                     this.addEventListenersToReloadBtn(mineId);
                 }
-                // nghỉ 300ms tránh spam
-                await new Promise(r => setTimeout(r, 300));
+                // nghỉ 1s tránh spam
+                await new Promise(r => setTimeout(r, 1000));
             }
         }
 
