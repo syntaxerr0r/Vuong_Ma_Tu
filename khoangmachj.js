@@ -494,7 +494,7 @@
                     this.addEventListenersToReloadBtn(mineId);
                 }
                 // nghỉ 500ms tránh spam
-                await new Promise(r => setTimeout(r, 500));
+                await new Promise(r => setTimeout(r, 1000));
             }
         }
 
