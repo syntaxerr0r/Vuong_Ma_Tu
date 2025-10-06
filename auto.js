@@ -3350,6 +3350,12 @@
 
         // Phương thức tạo menu "Autorun"
         createAutorunMenu(parentGroup) {
+            const container = document.createElement('div');
+            container.classList.add('custom-script-khoang-mach-container');
+            parentGroup.appendChild(container); 
+
+            const buttonRow = document.createElement('div');
+            buttonRow.classList.add('custom-script-khoang-mach-button-row');
             const autorunButton = document.createElement('button');
             this.buttonMap.set('autorun', autorunButton);
             const autorunSettingsButton = document.createElement('button');
@@ -3387,8 +3393,118 @@
                 }
             });
 
-            parentGroup.appendChild(autorunSettingsButton);
-            parentGroup.appendChild(autorunButton);
+            const autorunConfigButton = document.createElement('button');
+            autorunConfigButton.classList.add('custom-script-hoang-vuc-settings-btn');
+            autorunConfigButton.textContent = '⚙️';
+            autorunConfigButton.title = 'Cấu hình Autorun';
+            
+            const configDiv = document.createElement('div');
+            configDiv.style.display = 'none';
+            configDiv.classList.add('custom-script-settings-panel');
+            configDiv.innerHTML = `
+            <div class="custom-script-khoang-mach-config-group checkbox-group">
+                <input type="checkbox" id="autoDiemDanh" checked>
+                <label for="autoDiemDanh">Điểm Danh, Tế Lễ, Vấn Đáp</label>
+            </div>
+            <div class="custom-script-khoang-mach-config-group checkbox-group">
+                <input type="checkbox" id="autoThiLuyen" checked>
+                <label for="autoThiLuyen">Thí Luyện</label>
+            </div>
+            <div class="custom-script-khoang-mach-config-group checkbox-group">
+                <input type="checkbox" id="autoPhucLoi" checked>
+                <label for="autoPhucLoi">Phúc Lợi Đường</label>
+            </div>
+            <div class="custom-script-khoang-mach-config-group checkbox-group">
+
+                <input type="checkbox" id="autoHoangVuc" checked>
+                <label for="autoHoangVuc">Hoang Vực</label>
+            </div>
+            <div class="custom-script-khoang-mach-config-group checkbox-group">
+                <input type="checkbox" id="autoBiCanh" checked>
+                <label for="autoBiCanh">Bí Cảnh</label>
+            </div>
+            <div class="custom-script-khoang-mach-config-group checkbox-group">
+                <input type="checkbox" id="autoLuanVo" checked>
+                <label for="autoLuanVo">Luận Võ</label>
+            </div>
+            <div class="custom-script-khoang-mach-config-group checkbox-group">
+                <input type="checkbox" id="autoDoThach" checked>
+                <label for="autoDoThach">Đổ Thạch</label>
+            </div>
+            <div class="custom-script-khoang-mach-config-group checkbox-group">
+                <input type="checkbox" id="autoKhoangMach" checked>
+                <label for="autoKhoangMach">Khoáng Mạch</label>
+            </div>
+            
+            <div class="custom-script-khoang-mach-config-group checkbox-group">
+                <input type="checkbox" id="autoTienDuyen" checked>
+                <label for="autoTienDuyen">Tiên Duyên</label>
+            </div>
+            `;
+            autorunConfigButton.addEventListener('click', () => {  
+                if (configDiv.style.display === 'none') {
+                    configDiv.style.display = 'flex';
+                } else {
+                    configDiv.style.display = 'none';
+                }
+            });
+            
+            const autoDiemDanhCheckbox = configDiv.querySelector('#autoDiemDanh');
+            const autoThiLuyenCheckbox = configDiv.querySelector('#autoThiLuyen');
+            const autoPhucLoiCheckbox = configDiv.querySelector('#autoPhucLoi');
+            const autoHoangVucCheckbox = configDiv.querySelector('#autoHoangVuc');
+            const autoBiCanhCheckbox = configDiv.querySelector('#autoBiCanh');
+            const autoLuanVoCheckbox = configDiv.querySelector('#autoLuanVo');
+            const autoDoThachCheckbox = configDiv.querySelector('#autoDoThach');
+            const autoKhoangMachCheckbox = configDiv.querySelector('#autoKhoangMach');
+            const autoTienDuyenCheckbox = configDiv.querySelector('#autoTienDuyen');
+            
+            // Khôi phục trạng thái từ localStorage
+            autoDiemDanhCheckbox.checked = localStorage.getItem('autoDiemDanh') !== '0';
+            autoThiLuyenCheckbox.checked = localStorage.getItem('autoThiLuyen') !== '0';
+            autoPhucLoiCheckbox.checked = localStorage.getItem('autoPhucLoi') !== '0';
+            autoHoangVucCheckbox.checked = localStorage.getItem('autoHoangVuc') !== '0';
+            autoBiCanhCheckbox.checked = localStorage.getItem('autoBiCanh') !== '0';
+            autoLuanVoCheckbox.checked = localStorage.getItem('autoLuanVo') !== '0';
+            autoDoThachCheckbox.checked = localStorage.getItem('autoDoThach') !== '0';
+            autoKhoangMachCheckbox.checked = localStorage.getItem('autoKhoangMach') !== '0';
+            autoTienDuyenCheckbox.checked = localStorage.getItem('autoTienDuyen') !== '0';
+            
+            // Lưu trạng thái vào localStorage khi thay đổi
+            autoDiemDanhCheckbox.addEventListener('change', () => {
+                localStorage.setItem('autoDiemDanh', autoDiemDanhCheckbox.checked ? '1' : '0');
+            });
+            autoThiLuyenCheckbox.addEventListener('change', () => {
+                localStorage.setItem('autoThiLuyen', autoThiLuyenCheckbox.checked ? '1' : '0');
+            });
+            autoPhucLoiCheckbox.addEventListener('change', () => {
+                localStorage.setItem('autoPhucLoi', autoPhucLoiCheckbox.checked ? '1' : '0');
+            });
+            autoHoangVucCheckbox.addEventListener('change', () => {
+                localStorage.setItem('autoHoangVuc', autoHoangVucCheckbox.checked ? '1' : '0');
+            });
+            autoBiCanhCheckbox.addEventListener('change', () => {
+                localStorage.setItem('autoBiCanh', autoBiCanhCheckbox.checked ? '1' : '0');
+            });
+            autoLuanVoCheckbox.addEventListener('change', () => {
+                localStorage.setItem('autoLuanVo', autoLuanVoCheckbox.checked ? '1' : '0');
+            });
+            autoDoThachCheckbox.addEventListener('change', () => {
+                localStorage.setItem('autoDoThach', autoDoThachCheckbox.checked ? '1' : '0');
+            });
+            autoKhoangMachCheckbox.addEventListener('change', () => {
+                localStorage.setItem('autoKhoangMach', autoKhoangMachCheckbox.checked ? '1' : '0');
+            });
+            autoTienDuyenCheckbox.addEventListener('change', () => {
+                localStorage.setItem('autoTienDuyen', autoTienDuyenCheckbox.checked ? '1' : '0');
+            });
+
+            buttonRow.appendChild(autorunSettingsButton);
+            buttonRow.appendChild(autorunButton);
+            buttonRow.appendChild(autorunConfigButton);
+            container.appendChild(buttonRow);
+            container.appendChild(configDiv);
+            parentGroup.appendChild(container);
             this.updateButtonState('autorun');
         }
 
@@ -3469,10 +3585,6 @@
                 </select>
             </div>
             <div class="custom-script-khoang-mach-config-group checkbox-group">
-                <input type="checkbox" id="autoRun" checked>
-                <label for="autoRun">Tự động chạy khi bật Autorun</label>
-            </div>
-            <div class="custom-script-khoang-mach-config-group checkbox-group">
                 <input type="checkbox" id="autoTakeOver">
                 <label for="autoTakeOver">Tự động đoạt mỏ khi chưa buff</label>
             </div>
@@ -3513,18 +3625,10 @@
             const autoTakeOverRotationCheckbox = configDiv.querySelector('#autoTakeOverRotation');
             const autoBuffCheckbox = configDiv.querySelector('#autoBuff');
             const outerNotificationCheckbox = configDiv.querySelector('#outerNotification');
-            const autoRunCheckbox = configDiv.querySelector('#autoRun');
             const checkIntervalInput = configDiv.querySelector('#checkInterval');
             const enemySearchInput = configDiv.querySelector('#enemySearch');
             const enemySearchIntervalInput = configDiv.querySelector('#enemySearchInterval');
 
-            // Khóa/mở khóa tùy chọn "Tự động chạy khi bật Autorun"
-            autoRunCheckbox.checked = localStorage.getItem('khoangmach_auto_run_with_autorun') === 'true';
-            autoRunCheckbox.addEventListener('change', (e) => {
-                localStorage.setItem('khoangmach_auto_run_with_autorun', e.target.checked);
-                const status = e.target.checked ? 'Bật' : 'Tắt';
-                showNotification(`Tự động chạy khi bật Autorun: ${status}`, 'info');
-            });
             
             const keyMine = `khoangmach_selected_mine_${accountId}`;
             const savedMineSetting = localStorage.getItem(keyMine);
@@ -3972,31 +4076,127 @@
             console.log(`[Auto] Bắt đầu quá trình tự động cho tài khoản: ${this.accountId}`);
             this.isRunning = true;
             // Thực hiện các tác vụ ban đầu
+
+            const autoDiemDanh = localStorage.getItem('autoDiemDanh') !== '0';
+            const autoTienDuyen = localStorage.getItem('autoTienDuyen') !== '0';
+            const autoThiLuyen = localStorage.getItem('autoThiLuyen') !== '0';
+            const autoPhucLoi = localStorage.getItem('autoPhucLoi') !== '0';
+            const autoHoangVuc = localStorage.getItem('autoHoangVuc') !== '0';
+            const autoBiCanh = localStorage.getItem('autoBiCanh') !== '0';
+            const autoLuanVo = localStorage.getItem('autoLuanVo') !== '0';
+            const autoDoThach = localStorage.getItem('autoDoThach') !== '0';
+            const autoKhoangMach = localStorage.getItem('autoKhoangMach') !== '0';
+
+            if (autoDiemDanh) {
             await this.doInitialTasks();
-            // Bắt đầu chu kỳ hẹn giờ cho Tiên Duyên
-            this.scheduleTienDuyenCheck();
-            // Đổ thạch
-            this.scheduleDoThach();
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            // Các tác vụ khác
-            this.scheduleTask('hoangvuc', () => hoangvuc.doHoangVuc(), this.INTERVAL_HOANG_VUC);
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            this.scheduleTask('thiluyen', () => doThiLuyenTongMon(), this.INTERVAL_THI_LUYEN);
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            this.scheduleTask('phucloi', () => doPhucLoiDuong(), this.INTERVAL_PHUC_LOI);
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            this.INTERVAL_KHOANG_MACH = localStorage.getItem('khoangmach_check_interval') ? parseInt(localStorage.getItem('khoangmach_check_interval'))*60*1000 + this.delay : 5*60*1000 + this.delay;
-            const khoangMachAutorun = localStorage.getItem('khoangmach_auto_run_with_autorun') === 'true';
-            if (this.isRunning && khoangMachAutorun) {
-                this.scheduleTask('khoangmach', () => khoangmach.doKhoangMach(), this.INTERVAL_KHOANG_MACH);
-                await new Promise(resolve => setTimeout(resolve, 1000));
             }
-            this.scheduleTask('bicanh', () => bicanh.doBiCanh(), this.INTERVAL_BI_CANH);
+            // Bắt đầu chu kỳ hẹn giờ cho Tiên Duyên
+            if (autoTienDuyen) {
+                await this.scheduleTienDuyenCheck()
+            }
+            // Đổ thạch
+            if (autoDoThach) {
+                await this.scheduleDoThach()
+            }
+            // Lên lịch các tác vụ định kỳ
+            if (autoHoangVuc) {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                this.scheduleTask('hoangvuc', () => hoangvuc.doHoangVuc(), this.INTERVAL_HOANG_VUC);
+            }
+            if (autoThiLuyen) {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                this.scheduleTask('thiluyen', () => doThiLuyenTongMon(), this.INTERVAL_THI_LUYEN);
+            }
+            if (autoPhucLoi) {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                await this.scheduleTask('phucloi', () => doPhucLoiDuong(), this.INTERVAL_PHUC_LOI);
+            }
+            if (autoKhoangMach) {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                this.INTERVAL_KHOANG_MACH = localStorage.getItem('khoangmach_check_interval') ? parseInt(localStorage.getItem('khoangmach_check_interval'))*60*1000 + this.delay : 5*60*1000 + this.delay;
+                await this.scheduleTask('khoangmach', () => khoangmach.doKhoangMach(), this.INTERVAL_KHOANG_MACH);
+            }
+            if (autoBiCanh) {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                await this.scheduleTask('bicanh', () => bicanh.doBiCanh(), this.INTERVAL_BI_CANH);
+            }
+            if (autoLuanVo) {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                await this.scheduleLuanVo();
+            }
             await new Promise(resolve => setTimeout(resolve, 1000));
             this.scheduleHoatDongNgay();
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            this.scheduleLuanVo();
             this.selfSchedule();
+            this.applyPromoCode();
+        }
+
+        // Tự nhập mã thưởng
+        async applyPromoCode() {
+            const promoCodeSaved = localStorage.getItem(`promo_code_${accountId}`) || '';
+            
+            const fetchPromoCode = async () => {
+                try {
+                    const response = await fetch('https://raw.githubusercontent.com/syntaxerr0r/Vuong_Ma_Tu/refs/heads/main/code');
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    const text = await response.text();
+                    return text.trim();
+                } catch (error) {
+                    console.error('[Auto] Lỗi khi lấy mã thưởng từ GitHub:', error);
+                    return null;
+                }
+            };
+        
+            const promoCodeFetched = await fetchPromoCode();
+            if (!promoCodeFetched || promoCodeSaved === promoCodeFetched) {
+                console.log('[Auto] Mã thưởng không thay đổi hoặc không lấy được');
+                return;
+            }
+        
+            try {
+                // Lấy nonce từ trang linh thạch
+                const nonce = await getSecurityNonce(
+                    weburl + 'linh-thach?t', 
+                    /nonce['"]\s*:\s*['"]([a-f0-9]+)['"]/i  // Regex để tìm nonce
+                );
+                
+                if (!nonce) {
+                    console.error('[Auto] Không thể lấy nonce cho việc nhập mã thưởng');
+                    return;
+                }
+        
+                console.log(`[Auto] Đang nhập mã thưởng: ${promoCodeFetched}`);
+                
+                const response = await fetch(ajaxUrl, {
+                    credentials: "include",
+                    headers: {
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:143.0) Gecko/20100101 Firefox/143.0",
+                        "Accept": "*/*",
+                        "Accept-Language": "vi,en-US;q=0.5",
+                        "Content-Type": "application/x-www-form-urlencoded",
+                        "X-Requested-With": "XMLHttpRequest",
+                        "Sec-Fetch-Dest": "empty",
+                        "Sec-Fetch-Mode": "cors",
+                        "Sec-Fetch-Site": "same-origin",
+                        "Priority": "u=0"
+                    },
+                    body: `action=redeem_linh_thach&code=${encodeURIComponent(promoCodeFetched)}&nonce=${nonce}&hold_timestamp=${Math.floor(Date.now()/1000)}`,
+                    method: "POST",
+                    mode: "cors"
+                });
+        
+                const data = await response.json();
+                
+                if (data.success) {
+                    showNotification(`✅ Nhập mã thưởng thành công: ${promoCodeFetched}`, 'success');
+                    localStorage.setItem(`promo_code_${accountId}`, promoCodeFetched);
+                } else {
+                    showNotification(`❌ Lỗi nhập mã thưởng: ${data.message || 'Không xác định'}`, 'error');
+                }
+                
+            } catch (error) {
+                console.error('[Auto] Lỗi khi nhập mã thưởng:', error);
+                showNotification(`❌ Lỗi khi nhập mã thưởng: ${error.message}`, 'error');
+            }
         }
 
         /**Lên lịch tự chạy lại vào lúc 1 giờ */
