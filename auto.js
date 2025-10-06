@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey 
-// @version       3.8.2
+// @version       3.8.3
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.gg/*
@@ -2681,7 +2681,7 @@
                   flex-direction: column;
                   align-items: flex-end;
                   gap: 10px;
-                  z-index: 10000;
+                  z-index: 1000000;
                   pointer-events: none;
                 }
 
@@ -4154,11 +4154,8 @@
         
             try {
                 // Lấy nonce từ trang linh thạch
-                const nonce = await getSecurityNonce(
-                    weburl + 'linh-thach?t', 
-                    /nonce['"]\s*:\s*['"]([a-f0-9]+)['"]/i  // Regex để tìm nonce
-                );
-                
+                const nonce = await getSecurityNonce(weburl + 'linh-thach?t', /['"]action['"]\s*:\s*['"]redeem_linh_thach['"][\s\S]*?['"]nonce['"]\s*:\s*['"]([a-f0-9]+)['"]/i);
+
                 if (!nonce) {
                     console.error('[Auto] Không thể lấy nonce cho việc nhập mã thưởng');
                     return;
@@ -4187,7 +4184,9 @@
                 const data = await response.json();
                 
                 if (data.success) {
-                    showNotification(`✅ Nhập mã thưởng thành công: ${promoCodeFetched}`, 'success');
+                    showNotification(data.data.message, 'success');
+                    localStorage.setItem(`promo_code_${accountId}`, promoCodeFetched);
+                } else if (data.data.message  === '⚠️ Đạo hữu đã hấp thụ linh thạch này rồi!') {
                     localStorage.setItem(`promo_code_${accountId}`, promoCodeFetched);
                 } else {
                     showNotification(`❌ Lỗi nhập mã thưởng: ${data.message || 'Không xác định'}`, 'error');
