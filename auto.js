@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey 
-// @version       3.8.3
+// @version       3.8.4
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.gg/*
@@ -2339,7 +2339,7 @@
             const autoTakeoverRotation = localStorage.getItem('khoangmach_auto_takeover_rotation') === 'true';
             const rewardMode = localStorage.getItem('khoangmach_reward_mode') || 'any';
             const rewardTimeSelected = localStorage.getItem('khoangmach_reward_time');
-            const rewardTime = rewardTimeSelected
+            const rewardTime = rewardTimeSelected;
             const outerNotification = localStorage.getItem('khoangmach_outer_notification') === 'true';
 
             console.log(`${this.logPrefix} Bắt đầu quy trình cho mỏ ID: ${selectedMineInfo.id}.`);
@@ -2364,7 +2364,7 @@
             // Bắt đầu vòng lặp để kiểm tra và thực hiện tác vụ liên tục
             while (true) {
                 // Kiểm tra thông tin trong mỏ
-                await this.delay(1000); // Đợi 1 giây để tránh spam quá nhanh
+                await new Promise(resolve => setTimeout(resolve, 1000)); // Đợi 1 giây để tránh spam quá nhanh
                 let mineInfo = await this.getUsersInMine(targetMine.id);
                 if (!mineInfo) throw new Error('Lỗi lấy thông tin chi tiết trong mỏ');
                 const users = mineInfo.users || [];
@@ -4848,6 +4848,7 @@
                         const rate = this.winRate(myTuVi, opponentTuVi).toFixed(2);
                         this.upsertTuViInfo(btn, userId, opponentTuVi, myTuVi);
                     } else {
+                        await new Promise(r => setTimeout(r, 500))
                         this.upsertTierInfo(btn, userId);
                     }
                 } catch (e) {
