@@ -183,7 +183,7 @@
         }
         async getNonceGetUserInMine() {
             const htmlSource = document.documentElement.innerHTML;
-            const regex = /action:\s*'get_users_in_mine',\s*mine_id:\s*mine_id,\s*security:\s*'([a-f0-9]+)'/;
+            const regex = /action:\s*'get_users_in_mine',\s*mine_id:\s*mine_id,[\s\S]*?security:\s*'([a-f0-9]+)'/;
             const match = htmlSource.match(regex);
             return match ? match[1] : null;
         }
@@ -352,12 +352,47 @@
         }
 
         async getUsersInMine(mineId) {
-            const payload = new URLSearchParams({ action: 'get_users_in_mine', mine_id: mineId, security: this.nonceGetUserInMine });
+            // --- 1. Lấy 'security_token' từ global var ---
+            let securityToken = '';
+            // Dùng 'unsafeWindow' để truy cập biến của trang web (cho userscript)
+            const pageWindow = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+
+            if (typeof pageWindow.hh3dData !== 'undefined' && pageWindow.hh3dData.securityToken) {
+                securityToken = pageWindow.hh3dData.securityToken;
+            }
+
+            // --- 2. Kiểm tra các token (vì nonce có thể chưa được lấy) ---
+            if (!this.nonceGetUserInMine || !securityToken) {
+                let errorMsg = 'Lỗi (get_users):';
+                if (!this.nonceGetUserInMine) errorMsg += " Nonce (security) chưa được cung cấp.";
+                if (!securityToken) errorMsg += " Không tìm thấy 'security_token' (hh3dData).";
+                
+                showNotification(errorMsg, 'error');
+                return null;
+            }
+
+            const payload = new URLSearchParams({
+                action: 'get_users_in_mine',
+                mine_id: mineId,
+                security_token: securityToken,
+                security: this.nonceGetUserInMine 
+            });
+
             try {
-                    const r = await fetch(ajaxUrl, { method: 'POST', headers: this.headers, body: payload, credentials: 'include' });
-                    const d = await r.json();
-                    return d.success ? d.data : (showNotification(d.message || 'Lỗi lấy thông tin người chơi.', 'error'), null);
-            } catch (e) { console.error(`${this.logPrefix} ❌ Lỗi mạng (lấy user):`, e); return null; }
+                const r = await fetch(ajaxUrl, { 
+                    method: 'POST', 
+                    headers: this.headers, 
+                    body: payload, 
+                    credentials: 'include' 
+                });
+                const d = await r.json();
+                
+                return d.success ? d.data : (showNotification(d.message || 'Lỗi lấy thông tin người chơi.', 'error'), null);
+            
+            } catch (e) { 
+                console.error(`${this.logPrefix} ❌ Lỗi mạng (lấy user):`, e); 
+                return null; 
+            }
         }
 
         async  getTuVi(userId) {
