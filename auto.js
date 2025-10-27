@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey 
-// @version       3.9.1
+// @version       3.9.2
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.gg/*
@@ -148,15 +148,17 @@
     }
      
     function getSecurityToken() {
-            // 1. Chọn đúng 'window' (ưu tiên 'unsafeWindow' của userscript)
-            const pageWindow = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+        // 1. Chọn đúng 'window' (ưu tiên 'unsafeWindow' của userscript)
+        const pageWindow = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
 
-            // 2. Dùng optional chaining (?.) để lấy token an toàn
-            //    Nếu hh3dData hoặc securityToken không tồn tại, kết quả sẽ là 'undefined'
-            const token = pageWindow.hh3dData?.securityToken;
+        // 2. SỬA LẠI: Dùng '&&' thay vì '?.' để đảm bảo tương thích
+        //    Cách này kiểm tra 'pageWindow.hh3dData' tồn tại trước,
+        //    nếu đúng, nó mới lấy 'securityToken'.
+        const token = pageWindow.hh3dData && pageWindow.hh3dData.securityToken;
 
-            // 3. Trả về token nếu nó tồn tại và không rỗng, ngược lại trả về null
-            return token || null;
+        // 3. Trả về token nếu nó tồn tại và không rỗng, ngược lại trả về null
+        //    (Dòng này vẫn đúng)
+        return token || null;
     }
     //Lấy Nonce
     async function getNonce() {
@@ -2049,6 +2051,10 @@
             };
             this.getUsersInMineNonce = null;
             this.securityToken = this.getSecurityToken();
+        }
+
+        delay(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
         }
 
         getSecurityToken() {
