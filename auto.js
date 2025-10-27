@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey 
-// @version       3.9.2
+// @version       3.9.3
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.gg/*
@@ -148,18 +148,45 @@
     }
      
     function getSecurityToken() {
-        // 1. Chọn đúng 'window' (ưu tiên 'unsafeWindow' của userscript)
-        const pageWindow = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+        const logPrefix = "[HH3D GetToken]";
 
-        // 2. SỬA LẠI: Dùng '&&' thay vì '?.' để đảm bảo tương thích
-        //    Cách này kiểm tra 'pageWindow.hh3dData' tồn tại trước,
-        //    nếu đúng, nó mới lấy 'securityToken'.
-        const token = pageWindow.hh3dData && pageWindow.hh3dData.securityToken;
+        // --- CÁCH 1: Thử đọc biến (Nhanh) ---
+        try {
+            const pageWindow = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+            
+            // Dùng '&&' để tương thích với Safari cũ (thay cho '?.')
+            if (pageWindow.hh3dData && pageWindow.hh3dData.securityToken) {
+                const token = pageWindow.hh3dData.securityToken;
+                if (token) {
+                    console.log(`${logPrefix} ✅ Lấy thành công token từ biến 'hh3dData'.`);
+                    return token;
+                }
+            }
+        } catch (e) {
+            // Bỏ qua lỗi nếu có, để chuyển sang fallback
+            console.warn(`${logPrefix} ⚠️ Lỗi khi đọc 'hh3dData', đang chuyển sang quét HTML...`, e.message);
+        }
 
-        // 3. Trả về token nếu nó tồn tại và không rỗng, ngược lại trả về null
-        //    (Dòng này vẫn đúng)
-        return token || null;
+        // --- CÁCH 2: Fallback - Quét HTML (Ổn định) ---
+        console.log(`${logPrefix} ▶️ Thử fallback: Đang quét HTML để tìm 'security_token'...`);
+        try {
+            const htmlContent = document.documentElement.outerHTML;
+            const regex = /"securityToken"\s*:\s*"([^"]+)"/;
+            const match = htmlContent.match(regex);
+
+            if (match && match[1]) {
+                console.log(`${logPrefix} ✅ Lấy thành công token từ quét HTML.`);
+                return match[1];
+            }
+        } catch (e) {
+            console.error(`${logPrefix} ❌ Lỗi nghiêm trọng khi quét HTML:`, e);
+        }
+
+        // --- Thất bại ---
+        console.error(`${logPrefix} ❌ Không thể tìm thấy 'security_token' bằng cả hai cách.`);
+        return null;
     }
+
     //Lấy Nonce
     async function getNonce() {
         if (typeof customRestNonce !== 'undefined' && customRestNonce) {
@@ -2050,23 +2077,10 @@
                 "X-Requested-With": "XMLHttpRequest",
             };
             this.getUsersInMineNonce = null;
-            this.securityToken = this.getSecurityToken();
         }
 
         delay(ms) {
             return new Promise(resolve => setTimeout(resolve, ms));
-        }
-
-        getSecurityToken() {
-            // 1. Chọn đúng 'window' (ưu tiên 'unsafeWindow' của userscript)
-            const pageWindow = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
-
-            // 2. Dùng optional chaining (?.) để lấy token an toàn
-            //    Nếu hh3dData hoặc securityToken không tồn tại, kết quả sẽ là 'undefined'
-            const token = pageWindow.hh3dData?.securityToken;
-
-            // 3. Trả về token nếu nó tồn tại và không rỗng, ngược lại trả về null
-            return token || null;
         }
 
         async #getNonce(regex) {
@@ -2216,7 +2230,7 @@
             };
 
             try {
-                const d = await post({ action: 'enter_mine', mine_id: mineId, security_token: this.securityToken, security: nonce });
+                const d = await post({ action: 'enter_mine', mine_id: mineId, security_token: securityToken, security: nonce });
 
                 if (d.success) {
                     showNotification(d.data.message, 'success');
@@ -2237,7 +2251,7 @@
                         return false;
                     }
 
-                    const reward = await post({ action: 'claim_reward_km', security_token: this.securityToken, security: nonce });
+                    const reward = await post({ action: 'claim_reward_km', security_token: securityToken, security: nonce });
                     if (reward.success) {
                         showNotification(`Nhận thưởng <b>${reward.data.total_tuvi} tu vi và ${reward.data.total_tinh_thach} tinh thạch</b> tại khoáng mạch ${reward.data.mine_name}`, 'info');
                         return this.enterMine(mineId); // gọi lại để vào mỏ
@@ -2268,9 +2282,6 @@
                     this.getUsersInMineNonce = nonce; // lưu lại để dùng lần sau
                 }
             }
-
-            // --- 2. Lấy 'security_token' từ global var ---
-            const securityToken = this.securityToken;
 
             // --- 3. Kiểm tra cả hai token ---
             if (!nonce || !securityToken) {
@@ -2308,7 +2319,7 @@
         async takeOverMine(mineId) {
             const nonce = await this.#getNonce(/action: 'change_mine_owner',\s*mine_id:\s*mineId,[\s\S]*?security: '([a-f0-9]+)'/);
             if (!nonce) { showNotification('Lỗi nonce (take_over).', 'error'); return false; }
-            const payload = new URLSearchParams({ action: 'change_mine_owner', mine_id: mineId, security_token: this.securityToken, security: nonce });
+            const payload = new URLSearchParams({ action: 'change_mine_owner', mine_id: mineId, security_token: securityToken, security: nonce });
             try {
                 const r = await fetch(this.ajaxUrl, { method: 'POST', headers: this.headers, body: payload, credentials: 'include' });
                 const d = await r.json();
@@ -2342,7 +2353,7 @@
         async claimReward(mineId) {
             const nonce = await this.#getNonce(/action: 'claim_mycred_reward',\s*mine_id:\s*mine_id,[\s\S]*?security: '([a-f0-9]+)'/);
             if (!nonce) { showNotification('Lỗi nonce (claim_reward).', 'error'); return false; }
-            const payload = new URLSearchParams({ action: 'claim_mycred_reward', mine_id: mineId, security_token:this.securityToken, security: nonce });
+            const payload = new URLSearchParams({ action: 'claim_mycred_reward', mine_id: mineId, security_token:securityToken, security: nonce });
             try {
                 const r = await fetch(this.ajaxUrl, { method: 'POST', headers: this.headers, body: payload, credentials: 'include' });
                 const d = await r.json();
@@ -2364,7 +2375,7 @@
                 showNotification('Lỗi nonce (attack_user_in_mine).', 'error');
                 return false;
             }
-            const payload = new URLSearchParams({ action: 'attack_user_in_mine',  target_user_id: userId,  mine_id: mineId, security_token: this.securityToken, security: security});
+            const payload = new URLSearchParams({ action: 'attack_user_in_mine',  target_user_id: userId,  mine_id: mineId, security_token: securityToken, security: security});
             try {
                 const r = await fetch(this.ajaxUrl, { method: 'POST', headers: this.headers, body: payload, credentials: 'include' });
                 const d = await r.json();
