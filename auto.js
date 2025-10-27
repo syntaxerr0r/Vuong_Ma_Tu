@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey 
-// @version       3.9
+// @version       3.9.1
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.gg/*
@@ -99,6 +99,7 @@
         style.appendChild(document.createTextNode(css));
         document.head.appendChild(style);
     }
+    
     async function speak(textVN, textEN) {
         console.log("[TTS] Bắt đầu khởi tạo speak()");
         await new Promise(r => setTimeout(r, 300)); // đợi hệ thống load voice
@@ -145,7 +146,18 @@
         speechSynthesis.cancel();
         speechSynthesis.speak(u);
     }
+     
+    function getSecurityToken() {
+            // 1. Chọn đúng 'window' (ưu tiên 'unsafeWindow' của userscript)
+            const pageWindow = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
 
+            // 2. Dùng optional chaining (?.) để lấy token an toàn
+            //    Nếu hh3dData hoặc securityToken không tồn tại, kết quả sẽ là 'undefined'
+            const token = pageWindow.hh3dData?.securityToken;
+
+            // 3. Trả về token nếu nó tồn tại và không rỗng, ngược lại trả về null
+            return token || null;
+    }
     //Lấy Nonce
     async function getNonce() {
         if (typeof customRestNonce !== 'undefined' && customRestNonce) {
@@ -593,6 +605,7 @@
                     currentAttempt++;
                     const payloadLoadQuiz = new URLSearchParams();
                     payloadLoadQuiz.append('action', 'load_quiz_data');
+                    payloadLoadQuiz.append('security_token', securityToken);
 
                     const responseQuiz = await fetch(this.ajaxUrl, {
                         method: 'POST',
@@ -676,32 +689,38 @@
     // ===============================================
     async function doDailyCheckin(nonce) {
         try {
-            console.log('[HH3D Daily Check-in] ▶️ Bắt đầu Daily Check-in');
-            const url = weburl + 'wp-json/hh3d/v1/action';
-            const payload = new URLSearchParams();
-            payload.append('action', 'daily_check_in');
+                console.log('[HH3D Daily Check-in] ▶️ Bắt đầu Daily Check-in');
+                const url = weburl + 'wp-json/hh3d/v1/action';
+                const headers = {
+                    'Content-Type': 'application/json',
+                    'X-Wp-Nonce': nonce,
+                    'X-Requested-With': 'XMLHttpRequest'
+                };
 
-            const headers = {
-                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-                'X-Wp-Nonce': nonce
-            };
+                const bodyPayload = {
+                    action: 'daily_check_in'
+                };
 
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: headers,
-                body: payload
-            });
-            const data = await response.json();
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: headers,
+                    body: JSON.stringify(bodyPayload),
+                    credentials: 'include',
+                    referrer: weburl + 'diem-danh', 
+                    mode: 'cors'
+                });
+                
+                const data = await response.json();
 
-            if (response.ok && data.success) {
-                showNotification(`Điểm danh: ${data.message} (${data.streak} ngày)`, 'success');
-            } else {
-                showNotification(`Điểm danh: ${data.message || 'Lỗi không xác định'}`, 'warn');
-            }
-        } catch (e) {
-            console.error(`[HH3D Daily Check-in] ❌ Lỗi xảy ra:`, e);
-            showNotification(`Lỗi khi thực hiện Daily Check-in: ${e.message}`, 'error');
-        }
+                if (response.ok && data.success) {
+                    showNotification(`Điểm danh: ${data.message} (${data.streak} ngày)`, 'success');
+                } else {
+                    showNotification(`Điểm danh: ${data.message || 'Lỗi không xác định'}`, 'warn');
+                }
+            } catch (e) {
+                console.error(`[HH3D Daily Check-in] ❌ Lỗi xảy ra:`, e);
+                showNotification(`Lỗi khi thực hiện Daily Check-in: ${e.message}`, 'error');
+         }
     }
 
     // ===============================================
@@ -710,22 +729,33 @@
     async function doClanDailyCheckin(nonce) {
         try {
             console.log('[HH3D Clan Check-in] ▶️ Bắt đầu Clan Check-in');
-            const url = weburl + "wp-json/tong-mon/v1/te-le-tong-mon";
+            
+            // Giả định 'weburl' được định nghĩa ở scope bên ngoài
+            const url = weburl + "wp-json/tong-mon/v1/te-le-tong-mon"; 
 
+            // --- 1. CẬP NHẬT HEADERS ---
             const headers = {
                 "Content-Type": "application/json",
                 "X-WP-Nonce": nonce,
+                "security_token": securityToken
+            };
+
+            // --- 2. CẬP NHẬT BODY ---
+            const bodyPayload = {
+                action: "te_le_tong_mon",
+                security_token: securityToken
             };
 
             const response = await fetch(url, {
                 "credentials": "include",
-                "headers": headers,
+                "headers": headers, // (Đã cập nhật)
                 "referrer": weburl + "danh-sach-thanh-vien-tong-mon",
-                "body": "{}",
+                "body": JSON.stringify(bodyPayload), // <-- THAY ĐỔI TỪ "{}"
                 "method": "POST",
                 "mode": "cors"
             });
 
+            // Logic xử lý response giữ nguyên
             const data = await response.json();
             if (response.ok && data.success) {
                 showNotification(`Tế lễ: ${data.message} (${data.cong_hien_points})`, 'success');
@@ -763,15 +793,15 @@
         // --- Các phương thức private để gọi API và lấy nonce ---
 
         async #getLoadDataNonce() {
-            return this.getSecurityNonce(this.doThachUrl, /action: 'load_do_thach_data',\s*security: '([a-f0-9]+)'/);
+            return this.getSecurityNonce(this.doThachUrl, /action: 'load_do_thach_data',[\s\S]*?security: '([a-f0-9]+)'/);
         }
 
         async #getPlaceBetNonce() {
-            return this.getSecurityNonce(this.doThachUrl, /action: 'place_do_thach_bet',\s*security: '([a-f0-9]+)'/);
+            return this.getSecurityNonce(this.doThachUrl, /action: 'place_do_thach_bet',[\s\S]*?security: '([a-f0-9]+)'/);
         }
 
         async #getClaimRewardNonce() {
-            return this.getSecurityNonce(this.doThachUrl, /action: 'claim_do_thach_reward',\s*security: '([a-f0-9]+)'/);
+            return this.getSecurityNonce(this.doThachUrl, /action: 'claim_do_thach_reward',[\s\S]*?security: '([a-f0-9]+)'/);
         }
 
         /**
@@ -781,7 +811,7 @@
          */
         async #getDiceRollInfo(securityNonce) {
             console.log('[HH3D Đổ Thạch] ▶️ Đang lấy thông tin phiên...');
-            const payload = new URLSearchParams({ action: 'load_do_thach_data', security: securityNonce });
+            const payload = new URLSearchParams({ action: 'load_do_thach_data', security_token: securityToken, security: securityNonce });
             const headers = {
                 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
                 'X-Requested-With': 'XMLHttpRequest',
@@ -813,6 +843,7 @@
             console.log(`[HH3D Đặt Cược] 🪙 Đang cược ${betAmount} Tiên Ngọc vào ${stone.name}...`);
             const payload = new URLSearchParams({
                 action: 'place_do_thach_bet',
+                security_token: securityToken,
                 security: placeBetSecurity,
                 stone_id: stone.stone_id,
                 bet_amount: betAmount
@@ -869,7 +900,7 @@
                 showNotification('Lỗi khi lấy nonce để nhận thưởng.', 'error');
                 return false;
             }
-            const payload = new URLSearchParams({ action: 'claim_do_thach_reward', security: securityNonce });
+            const payload = new URLSearchParams({ action: 'claim_do_thach_reward', security_token: securityToken, security: securityNonce });
             const headers = {
                 'Accept': 'application/json, text/javascript, */*; q=0.01',
                 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
@@ -1004,7 +1035,7 @@
         console.log('[HH3D Thí Luyện Tông Môn] ▶️ Bắt đầu Thí Luyện Tông Môn');
 
         // Bước 1: Lấy security nonce.
-        const securityNonce = await getSecurityNonce(weburl + 'thi-luyen-tong-mon-hh3d?t', /action: 'open_chest_tltm',\s*security: '([a-f0-9]+)'/);
+        const securityNonce = await getSecurityNonce(weburl + 'thi-luyen-tong-mon-hh3d?t', /action: 'open_chest_tltm',[\s\S]*?security: '([a-f0-9]+)'/);
         if (!securityNonce) {
             showNotification('Lỗi khi lấy security nonce cho Thí Luyện Tông Môn.', 'error');
             throw new Error('Lỗi khi lấy security nonce cho Thí Luyện Tông Môn.');
@@ -1013,6 +1044,7 @@
         const url = ajaxUrl;
         const payload = new URLSearchParams();
         payload.append('action', 'open_chest_tltm');
+        payload.append('security_token', securityToken);
         payload.append('security', securityNonce);
 
         const headers = {
@@ -1061,7 +1093,7 @@
         console.log('[HH3D Phúc Lợi Đường] ▶️ Bắt đầu nhiệm vụ Phúc Lợi Đường.');
 
         // Bước 1: Lấy security nonce từ trang Phúc Lợi Đường
-        const securityNonce = await getSecurityNonce(weburl + 'phuc-loi-duong?t', /action: 'get_next_time_pl',\s*security: '([a-f0-9]+)'/);
+        const securityNonce = await getSecurityNonce(weburl + 'phuc-loi-duong?t', /action: 'get_next_time_pl',[\s\S]*?security: '([a-f0-9]+)'/);
         if (!securityNonce) {
             showNotification('Lỗi khi lấy security nonce cho Phúc Lợi Đường.', 'error');
             return;
@@ -1078,6 +1110,7 @@
         console.log('[HH3D Phúc Lợi Đường] ⏲️ Đang kiểm tra thời gian mở rương...');
         const payloadTime = new URLSearchParams();
         payloadTime.append('action', 'get_next_time_pl');
+        payloadTime.append('security_token', securityToken);
         payloadTime.append('security', securityNonce);
 
         try {
@@ -1105,6 +1138,7 @@
                     console.log(`[HH3D Phúc Lợi Đường] 🎁 Đang mở rương cấp ${chest_level + 1}...`);
                     const payloadOpen = new URLSearchParams();
                     payloadOpen.append('action', 'open_chest_pl');
+                    payloadOpen.append('security_token', securityToken);
                     payloadOpen.append('security', securityNonce);
                     payloadOpen.append('chest_id', chest_level + 1);
 
@@ -1862,7 +1896,7 @@
             // Bước 2: Tham gia trận đấu
             if (!taskTracker.getTaskStatus(accountId, 'luanvo').battle_joined) {
                 const joinResult = await this.sendApiRequest(
-                    'wp-json/luan-vo/v1/join-battle', 'POST', nonce, {}
+                    'wp-json/luan-vo/v1/join-battle', 'POST', nonce, {action: 'join_battle', security_token: securityToken}
                 );
                 if (joinResult && joinResult.success === true) {
                     console.log(`✅ Tham gia luận võ thành công.`);
@@ -2035,7 +2069,7 @@
 
 
         async loadMines(mineType) {
-            const nonce = await getSecurityNonce(this.khoangMachUrl, /action:\s*'load_mines_by_type',\s*mine_type:\s*mineType,\s*security:\s*'([a-f0-9]+)'/);
+            const nonce = await getSecurityNonce(this.khoangMachUrl, /action:\s*'load_mines_by_type',\s*mine_type:\s*mineType,[\s\S]*?security:\s*'([a-f0-9]+)'/);
             if (!nonce) { showNotification('Lỗi nonce (load_mines).', 'error'); return null; }
             const payload = new URLSearchParams({ action: 'load_mines_by_type', mine_type: mineType, security: nonce });
             try {
@@ -2070,7 +2104,7 @@
             // --- Nếu chưa có cache hoặc đã hết hạn, tải mới ---
             const nonce = await getSecurityNonce(
                 this.khoangMachUrl,
-                /action:\s*'load_mines_by_type',\s*mine_type:\s*mineType,\s*security:\s*'([a-f0-9]+)'/
+                /action:\s*'load_mines_by_type',\s*mine_type:\s*mineType,[\s\S]*?security:\s*'([a-f0-9]+)'/
             );
             if (!nonce) {
                 showNotification('Lỗi nonce (getAllMines).', 'error');
@@ -2283,7 +2317,7 @@
         }
 
         async buyBuffItem() {
-            const nonce = await this.#getNonce(/action: 'buy_item_khoang',\s*security: '([a-f0-9]+)'/);
+            const nonce = await this.#getNonce(/action: 'buy_item_khoang',[\s\S]*?security: '([a-f0-9]+)'/);
             if (!nonce) { showNotification('Lỗi nonce (buy_item).', 'error'); return false; }
             const payload = new URLSearchParams({ action: 'buy_item_khoang', security: nonce, item_id: 4 });
             try {
@@ -2551,7 +2585,7 @@
 
         // Lấy danh sách phòng cưới
         async getWeddingRooms() {
-            return await this.#post("show_all_wedding", {});
+            return await this.#post("show_all_wedding", {security_token: securityToken});
         }
 
         // Chúc phúc
@@ -2711,6 +2745,12 @@
     // ===============================================
     // HÀM HIỂN THỊ THÔNG BÁO
     //
+    /**
+     * HÀM HIỂN THỊ THÔNG BÁO
+     * @param {*} message: nội dung thông báo (hỗ trợ HTML)
+     * @param {*} type: success, warn, error, info
+     * @param {*} duration: thời gian hiển thị (ms)
+     */
     function showNotification(message, type = 'success', duration = 3000) {
 
         // --- Bắt đầu phần chèn CSS tự động ---
@@ -4991,6 +5031,10 @@
         } else {
             console.warn('[HH3D] ⚠️ Không thể lấy ID tài khoản.');
         }
+    const securityToken = getSecurityToken();
+    if (!securityToken) {
+        showNotification('[HH3D] ⚠️ Không thể lấy security token.', 'error');
+    }
     const vandap = new VanDap();
     const dothach = new DoThach();
     const hoangvuc = new HoangVuc();
@@ -5008,6 +5052,7 @@
     await tienduyen.init();
     const automatic = new AutomationManager();
     new Promise(resolve => setTimeout(resolve, 2000)); // Đợi 2 giây để UI ổn định
+
     automatic.checkAndStart()
     if (location.pathname.includes('khoang-mach') || location.href.includes('khoang-mach')) {
         const hienTuviKM = new hienTuviKhoangMach();
