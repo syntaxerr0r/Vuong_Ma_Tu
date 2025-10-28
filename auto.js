@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey 
-// @version       3.9.3
+// @version       3.9.4
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.gg/*
@@ -1486,6 +1486,7 @@
             const payload = new URLSearchParams();
             payload.append('action', 'attack_boss');
             payload.append('boss_id', bossId);
+            payload.append('security_token', securityToken);
             payload.append('nonce', nonce);
             payload.append('request_id', `req_${Math.random().toString(36).substring(2, 8)}${currentTime}`);
 
@@ -4821,16 +4822,6 @@
         }
 
         async getUsersInMine(mineId) {
-            // --- 1. Lấy 'security_token' từ global var ---
-            let securityToken = '';
-            // Dùng 'unsafeWindow' để truy cập biến của trang web (cho userscript)
-            const pageWindow = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
-
-            if (typeof pageWindow.hh3dData !== 'undefined' && pageWindow.hh3dData.securityToken) {
-                securityToken = pageWindow.hh3dData.securityToken;
-            }
-
-            // --- 2. Kiểm tra các token (vì nonce có thể chưa được lấy) ---
             if (!this.nonceGetUserInMine || !securityToken) {
                 let errorMsg = 'Lỗi (get_users):';
                 if (!this.nonceGetUserInMine) errorMsg += " Nonce (security) chưa được cung cấp.";
