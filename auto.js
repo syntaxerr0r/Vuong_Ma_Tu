@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey 
-// @version       3.9.4
+// @version       3.9.6
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.gg/*
@@ -28,16 +28,37 @@
     // Chỉ override khi đang ở trang Khoáng Mạch
     if (location.pathname.includes('khoang-mach') || location.href.includes('khoang-mach')) {
         const NEW_DELAY = 50;
+        const COOLDOWN_PERIOD = 5000; // 5 giây (tính bằng mili giây)
+        let lastChangeTimestamp = 0;    // Biến để lưu mốc thời gian lần cuối thay đổi
+
         const originalSetInterval = window.setInterval;
+
         window.setInterval = function(callback, delay, ...args) {
-            let actualDelay = delay;
-            if (typeof callback === 'function' && callback.toString().includes('countdown--') && callback.toString().includes('clearInterval(countdownInterval)')) {
-                    actualDelay = NEW_DELAY
-                    showNotification('Không được đánh đến khi hết thông báo này', 'error', 5000);
+            let actualDelay = delay; // Mặc định là delay gốc
+
+            // Kiểm tra xem có phải là hàm countdown cụ thể không
+            if (typeof callback === 'function' && 
+                callback.toString().includes('countdown--') && 
+                callback.toString().includes('clearInterval(countdownInterval)')) {
+                
+                const now = Date.now(); // Lấy thời gian hiện tại
+                
+                // Kiểm tra xem đã qua thời gian cooldown (5s) chưa
+                if (now - lastChangeTimestamp > COOLDOWN_PERIOD) {
+                    // ĐÃ HẾT 5.5s: Thực hiện thay đổi
+                    actualDelay = NEW_DELAY;                  
+                    // Cập nhật lại mốc thời gian cuối cùng
+                    lastChangeTimestamp = now;
+                } else {
+                    // VẪN TRONG 5s: Không làm gì cả, actualDelay vẫn là delay gốc
+                    // (Không đổi giờ, không hiện thông báo)
+                }
             }
+            
+            // Luôn gọi setInterval gốc với delay đã được xác định (hoặc là gốc, hoặc là NEW_DELAY)
             return originalSetInterval(callback, actualDelay, ...args);
         };
-    }
+    }   
 
     // Cấu trúc menu
     const LINK_GROUPS = [{
@@ -1766,7 +1787,7 @@
          * Đảm bảo tính năng tự động chấp nhận khiêu chiến được bật.
          */
         async ensureAutoAccept(nonce) {
-            if (taskTracker.getTaskStatus(accountId, 'luanvo', 'auto_accept') === 'true') {
+            if (taskTracker.getTaskStatus(accountId, 'luanvo', 'auto_accept') === true) {
                 return true; // Đã bật trước đó
             }
             const toggleEndpoint = 'wp-json/luan-vo/v1/toggle-auto-accept';
@@ -1779,7 +1800,7 @@
             }
             const result2 = await this.sendApiRequest(toggleEndpoint, 'POST', nonce, {});
             if (result2 && result2.success && result2.message.includes('Đã bật'))
-                {taskTracker.updateTask(accountId, 'luanvo', 'auto_accept', 'true');
+                {taskTracker.updateTask(accountId, 'luanvo', 'auto_accept', true);
                 return true;
             };
         }
@@ -1914,14 +1935,7 @@
         /**
          * Hàm chính: Chạy toàn bộ quy trình Luận Võ.
          */
-        async startLuanVo() {
-            console.log(`${this.logPrefix} ▶️ Gia nhập Luận Võ Đường.`);
-            const nonce = await getNonce();
-            // Bước 1: Lấy nonce nếu chưa có
-            if (!nonce) {
-                showNotification('❌ Lỗi: Không thể lấy nonce cho Luận Võ.', 'error');
-                return;
-            }
+        async startLuanVo(nonce) {
 
             // Bước 2: Tham gia trận đấu
             if (!taskTracker.getTaskStatus(accountId, 'luanvo').battle_joined) {
@@ -1953,12 +1967,13 @@
             }
         }
         async doLuanVo(autoChallenge) {
-            await this.startLuanVo();
+            
             const nonce = await getNonce();
             if (!nonce) {
-                showNotification('❌ Lỗi: Không thể lấy nonce cho Luận Võ.', 'error');
+                showNotification(' Lỗi: Không thể❌ lấy nonce cho Luận Võ.', 'error');
                 return;
             }
+            await this.startLuanVo(nonce);
             // Bước 4: Khiêu chiến người chơi
             if (!autoChallenge) {
                 //Hiện hộp thoại thông báo để người chơi tới trang luận võ thủ công
@@ -2352,21 +2367,40 @@
         }
 
         async claimReward(mineId) {
-            const nonce = await this.#getNonce(/action: 'claim_mycred_reward',\s*mine_id:\s*mine_id,[\s\S]*?security: '([a-f0-9]+)'/);
-            if (!nonce) { showNotification('Lỗi nonce (claim_reward).', 'error'); return false; }
-            const payload = new URLSearchParams({ action: 'claim_mycred_reward', mine_id: mineId, security_token:securityToken, security: nonce });
-            try {
-                const r = await fetch(this.ajaxUrl, { method: 'POST', headers: this.headers, body: payload, credentials: 'include' });
-                const d = await r.json();
-                if (d.success) {
-                    showNotification(d.data.message, 'success');
-                    taskTracker.adjustTaskTime(accountId, 'khoangmach', timePlus('30:00'));
-                    return true;
-                } else {
-                    showNotification(d.data.message || 'Lỗi nhận thưởng.', 'error');
+            const leaveMineToClaimReward = localStorage.getItem(`khoangmach_leave_mine_to_claim_reward_${accountId}`) === 'true';
+            if (leaveMineToClaimReward) {
+                const left = await this.leaveMine(mineId);
+                if (!left) {
+                    showNotification('Không thể rời mỏ để nhận thưởng.', 'error');
                     return false;
+                } else {
+                    await this.delay(500); // đợi 1s cho chắc
+                    const entered = await this.enterMine(mineId);
+                    if (!entered) {
+                        showNotification('Không thể vào lại mỏ sau khi nhận thưởng.', 'error');
+                        return false;
+                    } else {
+                        taskTracker.adjustTaskTime(accountId, 'khoangmach', timePlus('30:00'));
+                        return true;
+                    }
                 }
-            } catch (e) { console.error(`${this.logPrefix} ❌ Lỗi mạng (nhận thưởng):`, e); return false; }
+            } else {
+                const nonce = await this.#getNonce(/action: 'claim_mycred_reward',\s*mine_id:\s*mine_id,[\s\S]*?security: '([a-f0-9]+)'/);
+                if (!nonce) { showNotification('Lỗi nonce (claim_reward).', 'error'); return false; }
+                const payload = new URLSearchParams({ action: 'claim_mycred_reward', mine_id: mineId, security_token:securityToken, security: nonce });
+                try {
+                    const r = await fetch(this.ajaxUrl, { method: 'POST', headers: this.headers, body: payload, credentials: 'include' });
+                    const d = await r.json();
+                    if (d.success) {
+                        showNotification(d.data.message, 'success');
+                        taskTracker.adjustTaskTime(accountId, 'khoangmach', timePlus('30:00'));
+                        return true;
+                    } else {
+                        showNotification(d.data.message || 'Lỗi nhận thưởng.', 'error');
+                        return false;
+                    }
+                } catch (e) { console.error(`${this.logPrefix} ❌ Lỗi mạng (nhận thưởng):`, e); return false; }
+            }
         }
 
 
@@ -2418,6 +2452,23 @@
             return [];
         }
 
+        async leaveMine(mineId) {
+            const nonce = await this.#getNonce(/action: 'leave_mine',[\s\S]*?security: '([a-f0-9]+)'/);
+            if (!nonce) { showNotification('Lỗi nonce (leave_mine).', 'error'); return false; }
+            const payload = new URLSearchParams({ action: 'leave_mine', mine_id: mineId, security_token: securityToken, security: nonce });
+            try {
+                const r = await fetch(this.ajaxUrl, { method: 'POST', headers: this.headers, body: payload, credentials: 'include' });
+                const d = await r.json();
+                if (d.success) {
+                    showNotification(d.data.message, 'success');
+                    return true;
+                } else {
+                    showNotification(d.message || 'Lỗi rời mỏ.', 'error');
+                    return false;
+                }
+            } catch (e) { console.error(`${this.logPrefix} ❌ Lỗi mạng (rời mỏ):`, e); return false; }
+        }
+        
         async doKhoangMach() {
             const selectedMineSetting = localStorage.getItem(`khoangmach_selected_mine_${accountId}`);
             if (!selectedMineSetting) {
@@ -3696,6 +3747,10 @@
                 <label for="autoTakeOverRotation">Tự động đoạt mỏ khi có thể (đảo key)</label>
             </div>
             <div class="custom-script-khoang-mach-config-group checkbox-group">
+                <input type="checkbox" id="leaveMineToClaimReward" checked>
+                <label for="leaveMineToClaimReward">Rời mỏ để nhận thưởng (cao tầng đảo key)</label>
+            </div>
+            <div class="custom-script-khoang-mach-config-group checkbox-group">
                 <input type="checkbox" id="autoBuff">
                 <label for="autoBuff">Tự động mua Linh Quang Phù</label>
             </div>
@@ -3726,11 +3781,13 @@
             const rewardTimeSelect = configDiv.querySelector('#rewardTimeSelect');
             const autoTakeOverCheckbox = configDiv.querySelector('#autoTakeOver');
             const autoTakeOverRotationCheckbox = configDiv.querySelector('#autoTakeOverRotation');
+            const leaveMineToClaimRewardCheckbox = configDiv.querySelector('#leaveMineToClaimReward');
             const autoBuffCheckbox = configDiv.querySelector('#autoBuff');
             const outerNotificationCheckbox = configDiv.querySelector('#outerNotification');
             const checkIntervalInput = configDiv.querySelector('#checkInterval');
             const enemySearchInput = configDiv.querySelector('#enemySearch');
             const enemySearchIntervalInput = configDiv.querySelector('#enemySearchInterval');
+            
 
             
             const keyMine = `khoangmach_selected_mine_${accountId}`;
@@ -3749,6 +3806,7 @@
             rewardTimeSelect.value = localStorage.getItem('khoangmach_reward_time') || 'max';
             autoTakeOverCheckbox.checked = localStorage.getItem('khoangmach_auto_takeover') === 'true';
             autoTakeOverRotationCheckbox.checked = localStorage.getItem('khoangmach_auto_takeover_rotation') === 'true';
+            leaveMineToClaimRewardCheckbox.checked = localStorage.getItem(`khoangmach_leave_mine_to_claim_reward_${accountId}`) == 'true';
             autoBuffCheckbox.checked = localStorage.getItem('khoangmach_use_buff') === 'true';
             enemySearchInput.value = localStorage.getItem(`khoangmach_enemy_search_${accountId}`) || '';
             outerNotificationCheckbox.checked = localStorage.getItem('khoangmach_outer_notification') === 'true';
@@ -3788,14 +3846,33 @@
 
             autoTakeOverCheckbox.addEventListener('change', (e) => {
                 localStorage.setItem('khoangmach_auto_takeover', e.target.checked);
+                if (e.target.checked) {
+                    const khoangmach_auto_takeover_rotation = localStorage.getItem('khoangmach_auto_takeover_rotation') === 'true';
+                    if (khoangmach_auto_takeover_rotation) {
+                        autoTakeOverCheckbox.checked = false;
+                        localStorage.setItem('khoangmach_auto_takeover', false);
+                        showNotification('Tự động đoạt mỏ đã được tắt vì bạn đã bật tự đảo key.', 'info');
+                                            }
+                } else {
                 const status = e.target.checked ? 'Bật' : 'Tắt';
                 showNotification(`Tự động đoạt mỏ khi chưa buff: ${status}`, 'info');
+                }
             });
 
             autoTakeOverRotationCheckbox.addEventListener('change', (e) => {
                 localStorage.setItem('khoangmach_auto_takeover_rotation', e.target.checked);
                 const status = e.target.checked ? 'Bật' : 'Tắt';
                 showNotification(`Tự động đoạt mỏ khi có thể: ${status}`, 'info');
+                if (e.target.checked) {
+                    autoTakeOverCheckbox.checked = false;
+                    localStorage.setItem('khoangmach_auto_takeover', false);
+                }
+            });
+
+            leaveMineToClaimRewardCheckbox.addEventListener('change', (e) => {
+                localStorage.setItem(`khoangmach_leave_mine_to_claim_reward_${accountId}`, e.target.checked);
+                const status = e.target.checked ? 'Bật' : 'Tắt';
+                showNotification(`Rời mỏ để nhận thưởng: ${status}`, 'info');
             });
 
             autoBuffCheckbox.addEventListener('change', (e) => {
