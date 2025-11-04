@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey 
-// @version       3.9.6
+// @version       3.9.7
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.gg/*
@@ -25,41 +25,24 @@
     let userBetCount = 0;
     let userBetStones = [];
 
-    // Chỉ override khi đang ở trang Khoáng Mạch
+     // Chỉ override khi đang ở trang Khoáng Mạch
     if (location.pathname.includes('khoang-mach') || location.href.includes('khoang-mach')) {
-        const NEW_DELAY = 50;
-        const COOLDOWN_PERIOD = 5000; // 5 giây (tính bằng mili giây)
-        let lastChangeTimestamp = 0;    // Biến để lưu mốc thời gian lần cuối thay đổi
-
-        const originalSetInterval = window.setInterval;
-
-        window.setInterval = function(callback, delay, ...args) {
-            let actualDelay = delay; // Mặc định là delay gốc
-
-            // Kiểm tra xem có phải là hàm countdown cụ thể không
-            if (typeof callback === 'function' && 
-                callback.toString().includes('countdown--') && 
-                callback.toString().includes('clearInterval(countdownInterval)')) {
-                
-                const now = Date.now(); // Lấy thời gian hiện tại
-                
-                // Kiểm tra xem đã qua thời gian cooldown (5s) chưa
-                if (now - lastChangeTimestamp > COOLDOWN_PERIOD) {
-                    // ĐÃ HẾT 5.5s: Thực hiện thay đổi
-                    actualDelay = NEW_DELAY;                  
-                    // Cập nhật lại mốc thời gian cuối cùng
-                    lastChangeTimestamp = now;
-                } else {
-                    // VẪN TRONG 5s: Không làm gì cả, actualDelay vẫn là delay gốc
-                    // (Không đổi giờ, không hiện thông báo)
+        const fastAttack = localStorage.getItem('khoang_mach_fast_attack') === 'true';
+        if (fastAttack) {
+            const NEW_DELAY = 50;
+            const originalSetInterval = window.setInterval;
+            window.setInterval = function(callback, delay, ...args) {
+                let actualDelay = delay;
+                if (typeof callback === 'function' && callback.toString().includes('countdown--') && 
+                        callback.toString().includes('clearInterval(countdownInterval)') &&
+                        callback.toString().includes('executeAttack')){
+                    actualDelay = NEW_DELAY
+                    showNotification('Không được đánh đến khi hết thông báo này', 'error', 5500);
                 }
-            }
-            
-            // Luôn gọi setInterval gốc với delay đã được xác định (hoặc là gốc, hoặc là NEW_DELAY)
             return originalSetInterval(callback, actualDelay, ...args);
-        };
-    }   
-
+            };
+        }
+    }
     // Cấu trúc menu
     const LINK_GROUPS = [{
         name: 'Autorun',
@@ -3758,6 +3741,10 @@
                 <input type="checkbox" id="outerNotification" checked>
                 <label for="outerNotification">Thông báo ngoại tông vào khoáng</label>
             </div>
+            <div class="custom-script-khoang-mach-config-group checkbox-group">
+                <input type="checkbox" id="fastAttack" checked>
+                <label for="fastAttack">Bỏ qua thời gian chờ khi tấn công</label>
+            </div>
             <div class="custom-script-khoang-mach-config-group number-input-group">
                 <label for="checkInterval" align="left" title="Khoảng thời gian (phút) để kiểm tra và thực hiện các hành động liên quan đến Khoáng Mạch.">Thời gian kiểm tra khoáng (phút)</label>
                 <input type="number" id="checkInterval" value="5" style="width: 50px;">
@@ -3784,6 +3771,7 @@
             const leaveMineToClaimRewardCheckbox = configDiv.querySelector('#leaveMineToClaimReward');
             const autoBuffCheckbox = configDiv.querySelector('#autoBuff');
             const outerNotificationCheckbox = configDiv.querySelector('#outerNotification');
+            const fastAttackCheckbox = configDiv.querySelector('#fastAttack');
             const checkIntervalInput = configDiv.querySelector('#checkInterval');
             const enemySearchInput = configDiv.querySelector('#enemySearch');
             const enemySearchIntervalInput = configDiv.querySelector('#enemySearchInterval');
@@ -3808,6 +3796,7 @@
             autoTakeOverRotationCheckbox.checked = localStorage.getItem('khoangmach_auto_takeover_rotation') === 'true';
             leaveMineToClaimRewardCheckbox.checked = localStorage.getItem(`khoangmach_leave_mine_to_claim_reward_${accountId}`) == 'true';
             autoBuffCheckbox.checked = localStorage.getItem('khoangmach_use_buff') === 'true';
+            fastAttackCheckbox.checked = localStorage.getItem('khoangmach_fast_attack') === 'true';
             enemySearchInput.value = localStorage.getItem(`khoangmach_enemy_search_${accountId}`) || '';
             outerNotificationCheckbox.checked = localStorage.getItem('khoangmach_outer_notification') === 'true';
             enemySearchIntervalInput.value = localStorage.getItem('khoangmach_enemy_search_interval') || '5';
@@ -3879,6 +3868,12 @@
                 localStorage.setItem('khoangmach_use_buff', e.target.checked);
                 const status = e.target.checked ? 'Bật' : 'Tắt';
                 showNotification(`Tự động mua Linh Quang Phù: ${status}`, 'info');
+            });
+
+            fastAttackCheckbox.addEventListener('change', (e) => {
+                localStorage.setItem('khoangmach_fast_attack', e.target.checked);
+                const status = e.target.checked ? 'Bật' : 'Tắt';
+                showNotification(`Bỏ qua thời gian chờ khi tấn công: ${status}`, 'info');
             });
 
             checkIntervalInput.addEventListener('change', (e) => {
