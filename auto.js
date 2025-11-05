@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey 
-// @version       3.9.7
+// @version       3.9.8
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.gg/*
@@ -27,7 +27,7 @@
 
      // Chỉ override khi đang ở trang Khoáng Mạch
     if (location.pathname.includes('khoang-mach') || location.href.includes('khoang-mach')) {
-        const fastAttack = localStorage.getItem('khoang_mach_fast_attack') === 'true';
+        const fastAttack = localStorage.getItem('khoangmach_fast_attack') === 'true';
         if (fastAttack) {
             const NEW_DELAY = 50;
             const originalSetInterval = window.setInterval;
