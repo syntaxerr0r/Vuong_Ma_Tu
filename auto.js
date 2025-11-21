@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey 
-// @version       3.9.9
+// @version       4.0.0
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.gg/*
@@ -190,8 +190,22 @@
             const match = htmlContent.match(regex);
 
             if (match && match[1]) {
+                const token = match[1];
                 console.log(`${logPrefix} ✅ Lấy thành công token.`);
-                return match[1]; // Trả về token
+
+                // Cập nhật biến toàn cục hh3dData nếu có
+                try {
+                    if (typeof window !== 'undefined' && window.hh3dData && typeof window.hh3dData === 'object') {
+                        window.hh3dData.securityToken = token;
+                        console.log(`${logPrefix} 🔄 Đã cập nhật window.hh3dData.securityToken`);
+                    } else {
+                        console.log(`${logPrefix} ⚠️ window.hh3dData không tồn tại hoặc không phải object — bỏ qua cập nhật.`);
+                    }
+                } catch (err) {
+                    console.warn(`${logPrefix} ⚠️ Không thể cập nhật hh3dData:`, err);
+                }
+
+                return token; // Trả về token
             } else {
                 console.error(`${logPrefix} ❌ Không tìm thấy 'securityToken' trong nội dung HTML.`);
                 return null;
@@ -2100,6 +2114,7 @@
             };
             this.getUsersInMineNonce = null;
             this.securityToken = null;
+            this.buffBought = false;
         }
 
         delay(ms) {
@@ -2251,7 +2266,7 @@
                 });
                 return r.json();
             };
-
+            this.securityToken = await getSecurityToken(this.khoangMachUrl);
             try {
                 const d = await post({ action: 'enter_mine', mine_id: mineId, security_token: this.securityToken, security: nonce });
 
@@ -2305,7 +2320,7 @@
                     this.getUsersInMineNonce = nonce; // lưu lại để dùng lần sau
                 }
             }
-
+            this.securityToken = await getSecurityToken(this.khoangMachUrl);
             // --- 3. Kiểm tra cả hai token ---
             if (!nonce || !this.securityToken) {
                 let errorMsg = 'Lỗi (get_users):';
@@ -2331,7 +2346,7 @@
                 const d = await r.json();
                 
                 // Logic trả về của bạn (hoạt động tốt)
-                return d.success ? d.data : (showNotification(d.message || 'Lỗi lấy thông tin người chơi.', 'error'), null);
+                return d.success ? d.data : (showNotification(d.data.message || 'Lỗi lấy thông tin người chơi.', 'error'), null);
             
             } catch (e) { 
                 console.error(`${this.logPrefix} ❌ Lỗi mạng (lấy user):`, e); 
@@ -2342,6 +2357,7 @@
         async takeOverMine(mineId) {
             const nonce = await this.#getNonce(/action: 'change_mine_owner',\s*mine_id:\s*mineId,[\s\S]*?security: '([a-f0-9]+)'/);
             if (!nonce) { showNotification('Lỗi nonce (take_over).', 'error'); return false; }
+            this.securityToken = await getSecurityToken(this.khoangMachUrl);
             const payload = new URLSearchParams({ action: 'change_mine_owner', mine_id: mineId, security_token: this.securityToken, security: nonce });
             try {
                 const r = await fetch(this.ajaxUrl, { method: 'POST', headers: this.headers, body: payload, credentials: 'include' });
@@ -2365,6 +2381,7 @@
                 const d = await r.json();
                 if (d.success) {
                     showNotification(d.data.message || 'Đã mua Linh Quang Phù', 'success');
+                    this.buffBought = true;
                     return true;
                 } else {
                     showNotification(d.data.message || 'Lỗi mua Linh Quang Phù', 'error');
@@ -2394,6 +2411,7 @@
             } else {
                 const nonce = await this.#getNonce(/action: 'claim_mycred_reward',\s*mine_id:\s*mine_id,[\s\S]*?security: '([a-f0-9]+)'/);
                 if (!nonce) { showNotification('Lỗi nonce (claim_reward).', 'error'); return false; }
+                this.securityToken = await getSecurityToken(this.khoangMachUrl);
                 const payload = new URLSearchParams({ action: 'claim_mycred_reward', mine_id: mineId, security_token:this.securityToken, security: nonce });
                 try {
                     const r = await fetch(this.ajaxUrl, { method: 'POST', headers: this.headers, body: payload, credentials: 'include' });
@@ -2621,7 +2639,7 @@
                     }
 
                     // Nếu có chọn mua buff
-                    if (useBuff && bonus > 20) {
+                    if (useBuff && bonus > 20 && !this.buffBought) {
                         await this.delay(500);
                         console.log(`[Khoáng mạch] Mua linh quang phù...`);
                         await this.buyBuffItem(targetMine.id);
@@ -2668,6 +2686,7 @@
 
         // Lấy danh sách phòng cưới
         async getWeddingRooms() {
+            this.securityToken = await getSecurityToken(weburl + 'tien-duyen?t');
             return await this.#post("show_all_wedding", {security_token: this.securityToken});
         }
 
