@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey 
-// @version       4.0.0
+// @version       4.0.1
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.gg/*
@@ -194,16 +194,16 @@
                 console.log(`${logPrefix} ✅ Lấy thành công token.`);
 
                 // Cập nhật biến toàn cục hh3dData nếu có
-                try {
-                    if (typeof window !== 'undefined' && window.hh3dData && typeof window.hh3dData === 'object') {
-                        window.hh3dData.securityToken = token;
-                        console.log(`${logPrefix} 🔄 Đã cập nhật window.hh3dData.securityToken`);
-                    } else {
-                        console.log(`${logPrefix} ⚠️ window.hh3dData không tồn tại hoặc không phải object — bỏ qua cập nhật.`);
-                    }
-                } catch (err) {
-                    console.warn(`${logPrefix} ⚠️ Không thể cập nhật hh3dData:`, err);
-                }
+         //       try {
+          //          if (typeof window !== 'undefined' && window.hh3dData && typeof window.hh3dData === 'object') {
+           //             window.hh3dData.securityToken = token;
+          //              console.log(`${logPrefix} 🔄 Đã cập nhật window.hh3dData.securityToken`);
+           //         } else {
+         //               console.log(`${logPrefix} ⚠️ window.hh3dData không tồn tại hoặc không phải object — bỏ qua cập nhật.`);
+         //           }
+         //       } catch (err) {
+          //          console.warn(`${logPrefix} ⚠️ Không thể cập nhật hh3dData:`, err);
+          //      }
 
                 return token; // Trả về token
             } else {
