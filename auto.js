@@ -2481,6 +2481,7 @@
         async leaveMine(mineId) {
             const nonce = await this.#getNonce(/action: 'leave_mine',[\s\S]*?security: '([a-f0-9]+)'/);
             if (!nonce) { showNotification('Lỗi nonce (leave_mine).', 'error'); return false; }
+            this.securityToken = await getSecurityToken(this.khoangMachUrl);
             const payload = new URLSearchParams({ action: 'leave_mine', mine_id: mineId, security_token: this.securityToken, security: nonce });
             try {
                 const r = await fetch(this.ajaxUrl, { method: 'POST', headers: this.headers, body: payload, credentials: 'include' });
