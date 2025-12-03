@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey 
-// @version       4.0.1
+// @version       4.1
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.gg/*
@@ -82,6 +82,12 @@
         links: [{
             text: 'Khoáng Mạch',
             isKhoangMach: true
+        }]
+    }, {
+        name: 'Tiên Duyên',
+        links: [{
+            text: 'Tiên Duyên',
+            isTienDuyen: true
         }]
     }, {
         name: 'Bảng hoạt động ngày',
@@ -354,7 +360,7 @@
                 dothach: { betplaced: false, reward_claimed: false, turn: 1 },
                 luanvo: { battle_joined: false, auto_accept: false, done: false },
                 khoangmach: {done: false, nextTime: null},
-                tienduyen: {last_check: null},
+                tienduyen: {done: false, last_check: null},
                 hoatdongngay: {done: false}
             };
 
@@ -2738,6 +2744,57 @@
                 await new Promise(r => setTimeout(r, 1000)); // chờ 1 giây tránh spam
             }
         }
+
+        //Tặng hoa
+        async tangHoa() {
+            const friendIds = localStorage.getItem('tienDuyenInputValue') || '';
+            const friendIdList = friendIds.split(';');
+            friendLoop: for (const friendId of friendIdList) {
+                if (friendId) {
+                    const responseCheckGift = await fetch(weburl + '/wp-json/hh3d/v1/action', {
+                        method: 'POST',
+                        credentials: 'include',
+                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                            'X-Wp-Nonce': this.nonce
+                        },
+                        body: `action=check_daily_gift_limit&user_id=${accountId}&friend_id=${friendId}&cost_type=tien_ngoc`,
+                    });
+                    const dataCheckGift = await responseCheckGift.json();
+                    if (dataCheckGift.success === false || dataCheckGift.tien_ngoc_available === false) {
+                        showNotification(dataCheckGift.message, 'error');
+                        continue;
+                    }
+                    if (dataCheckGift.code === "daily_limit_exceeded") {
+                        showNotification(dataCheckGift.message, 'error');
+                        taskTracker.markTaskDone(accountId, 'tienduyen');
+                        break friendLoop;
+                    }
+                    for (let i = 0; i < dataCheckGift.remaining_free_gifts; i++) {
+                        const response = await fetch(weburl + '/wp-json/hh3d/v1/action', {
+                        method: 'POST',
+                        credentials: 'include',
+                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                            'X-Wp-Nonce': this.nonce
+                        },
+                        body: `action=gift_to_friend&cost_type=tien_ngoc&friend_id=${friendId}&gift_type=hoa_hong`,
+                        });
+                        const data = await response.json();
+                        if (data.success) {
+                            showNotification(data.message, 'success');
+                        } else {
+                            showNotification(data.message, 'error');
+                            if (data.code === "daily_limit_exceeded") {
+                                taskTracker.markTaskDone(accountId, 'tienduyen');
+                                break friendLoop;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
     }
 
     //==================================
@@ -3360,6 +3417,7 @@
                 case 'phucloi':
                 case 'hoangvuc':
                 case 'luanvo':
+                case 'tienduyen':
                 case 'khoangmach':
                     if (taskTracker.isTaskDone(this.accountId, taskName)) {
                         button.disabled = true;
@@ -4028,6 +4086,62 @@
             });
         }
 
+        async createTienDuyenMenu(parentGroup) {
+            const container = document.createElement('div');
+            container.classList.add('custom-script-khoang-mach-container');
+            parentGroup.appendChild(container);
+
+            const buttonRow = document.createElement('div');
+            buttonRow.classList.add('custom-script-khoang-mach-button-row');
+            container.appendChild(buttonRow);
+
+            const tienduyenButton = document.createElement('button');
+            const settingButton = document.createElement('button');
+            tienduyenButton.textContent = 'Tiên Duyên';
+            tienduyenButton.classList.add('custom-script-khoang-mach-button');
+
+            settingButton.textContent = '⚙️';
+            settingButton.classList.add('custom-script-hoang-vuc-settings-btn');
+            buttonRow.appendChild(settingButton);
+            buttonRow.appendChild(tienduyenButton);
+            
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.value = '';
+            input.classList.add('custom-script-menu-input');
+            input.placeholder = "Nhập id người nhận hoa, ví dụ: 12345;23456;32456";
+            input.style.display = 'none';
+            container.appendChild(input);
+
+            tienduyenButton.addEventListener('click', async () => {
+                    tienduyenButton.disabled = true;
+                    tienduyenButton.textContent = 'Đang xử lý...';
+                    try {
+                        await tienduyen.tangHoa();
+                    } finally {
+                        tienduyenButton.textContent = 'Tiên Duyên';
+                        this.updateButtonState('tienduyen');
+                    }
+            });
+
+            // Ẩn/hiện input
+            settingButton.addEventListener('click', () => {
+                input.style.display = input.style.display === 'none' ? 'block' : 'none';
+            }); 
+
+            //Lưu input khi nhập
+            input.addEventListener('input', () => {
+                localStorage.setItem('tienDuyenInputValue', input.value);
+            });
+
+            //Khởi tạo input khi load
+            input.value = localStorage.getItem('tienDuyenInputValue') || '';
+
+            // Lưu nút vào Map
+            this.buttonMap.set('tienduyen', tienduyenButton);
+            this.updateButtonState('tienduyen');
+ 
+        }
         // Phương thức chung để tạo các nút nhiệm vụ tự động
         createAutoTaskButton(link, parentGroup) {
             const button = document.createElement('button');
@@ -4186,6 +4300,9 @@
                 } else if (link.isKhoangMach) {
                     // Khoáng Mạch
                     this.uiMenuCreator.createKhoangMachMenu(groupDiv);
+                } else if (link.isTienDuyen) {
+                    // Tiên Duyên
+                    this.uiMenuCreator.createTienDuyenMenu(groupDiv);
                 } else {
                     const menuItem = document.createElement('a');
                     menuItem.classList.add('custom-script-menu-link');
