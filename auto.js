@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey 
-// @version       4.1
+// @version       4.2
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.gg/*
@@ -2747,8 +2747,9 @@
 
         //Tặng hoa
         async tangHoa() {
-            const friendIds = localStorage.getItem('tienDuyenInputValue') || '';
+            const friendIds = localStorage.getItem(`tienDuyenInputValue_${accountId}`) || '';
             const friendIdList = friendIds.split(';');
+            let count = 0;
             friendLoop: for (const friendId of friendIdList) {
                 if (friendId) {
                     const responseCheckGift = await fetch(weburl + '/wp-json/hh3d/v1/action', {
@@ -2765,11 +2766,15 @@
                         showNotification(dataCheckGift.message, 'error');
                         continue;
                     }
-                    if (dataCheckGift.code === "daily_limit_exceeded") {
+                    if (dataCheckGift.message === "Đạo hữu đã gửi quà cho tối đa 5 người bạn khác nhau trong ngày hôm nay! Hãy thử lại vào ngày mai.") {
                         showNotification(dataCheckGift.message, 'error');
                         taskTracker.markTaskDone(accountId, 'tienduyen');
                         break friendLoop;
                     }
+                    if (dataCheckGift.message === 'Đã đạt giới hạn tặng bằng Tiên Ngọc cho người này hôm nay.') {
+                        count++;
+                    }
+                    // Tặng hoa 3 lần hoặc tối đa số hoa còn lại
                     for (let i = 0; i < dataCheckGift.remaining_free_gifts; i++) {
                         const response = await fetch(weburl + '/wp-json/hh3d/v1/action', {
                         method: 'POST',
@@ -2783,18 +2788,59 @@
                         const data = await response.json();
                         if (data.success) {
                             showNotification(data.message, 'success');
+                            if (i === dataCheckGift.remaining_free_gifts - 1) { count++; }
                         } else {
                             showNotification(data.message, 'error');
-                            if (data.code === "daily_limit_exceeded") {
+                            if (data.message === "Đạo hữu đã gửi quà cho tối đa 5 người bạn khác nhau trong ngày hôm nay! Hãy thử lại vào ngày mai.") {
                                 taskTracker.markTaskDone(accountId, 'tienduyen');
                                 break friendLoop;
                             }
                         }
+                        await new Promise(r => setTimeout(r, 300));
                     }
+                    showNotification(`Đã tặng hoa cho bạn bè: ${count}`, 'info');
+                    if (count >= 5) {
+                        taskTracker.markTaskDone(accountId, 'tienduyen');
+                        break friendLoop;
+                    }; // Chỉ tặng hoa cho tối đa 5 bạn bè
+                    await new Promise(r => setTimeout(r, 300));
                 }
             }
         }
         
+        //Danh sách bạn bè
+        async danhsachBanBe() {
+            const response = await fetch(weburl + '/wp-json/hh3d/v1/action', {
+                method: 'POST',
+                credentials: 'include',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'X-Wp-Nonce': this.nonce
+                },
+                body: `action=get_friends_td`,
+            });
+            const data = await response.json();
+            const now = new Date(); // Thời gian hiện tại
+            const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000; // 3 ngày đổi ra mili-giây
+
+            return data
+                .filter(user => {
+                    // Chuyển string time thành đối tượng Date
+                    // replace(' ', 'T') để đảm bảo chuẩn ISO cho mọi trình duyệt
+                    const userTime = new Date(user.time.replace(' ', 'T'));
+                    
+                    // Tính khoảng cách thời gian
+                    const diff = now - userTime;
+                    
+                    // Giữ lại nếu khoảng cách > 3 ngày
+                    return diff > THREE_DAYS_MS;
+                })
+                .map(user => ({
+                    id: user.user_id,
+                    name: user.display_name,
+                    thanMat: user.than_mat
+                }));
+        }
     }
 
     //==================================
@@ -4105,13 +4151,25 @@
             buttonRow.appendChild(settingButton);
             buttonRow.appendChild(tienduyenButton);
             
+            const inputRow = document.createElement('div');
+            inputRow.classList.add('custom-script-khoang-mach-button-row');
+            inputRow.style.display = 'none';
+            container.appendChild(inputRow);
+
             const input = document.createElement('input');
             input.type = 'text';
             input.value = '';
             input.classList.add('custom-script-menu-input');
             input.placeholder = "Nhập id người nhận hoa, ví dụ: 12345;23456;32456";
-            input.style.display = 'none';
-            container.appendChild(input);
+            input.style.flex = '1';
+            inputRow.appendChild(input);
+
+            const searchButton = document.createElement('button');
+            searchButton.textContent = '🔍';
+            searchButton.classList.add('custom-script-hoang-vuc-settings-btn');
+            inputRow.appendChild(searchButton);
+            
+            // Xử lý sự kiện tìm kiếm id người nhận hoa
 
             tienduyenButton.addEventListener('click', async () => {
                     tienduyenButton.disabled = true;
@@ -4124,18 +4182,71 @@
                     }
             });
 
-            // Ẩn/hiện input
+            // Ẩn/hiện inputRow
             settingButton.addEventListener('click', () => {
-                input.style.display = input.style.display === 'none' ? 'block' : 'none';
+                inputRow.style.display = inputRow.style.display === 'none' ? 'flex' : 'none';
             }); 
 
             //Lưu input khi nhập
             input.addEventListener('input', () => {
-                localStorage.setItem('tienDuyenInputValue', input.value);
+                localStorage.setItem(`tienDuyenInputValue_${accountId}`, input.value);
+            });
+
+            /**
+             * Hàm lấy danh sách id từ input
+             * @return {Array<string>} Mảng id người nhận hoa: ['12345', '23456', ...]
+             */
+            const inputList = () => {
+                return input.value.split(';').map(id => id.trim()).filter(id => id);
+            };
+
+            const friendContainer = document.createElement('div');
+            friendContainer.classList.add('custom-script-khoang-mach-container');
+            friendContainer.style.maxHeight = '300px';
+            friendContainer.style.overflowY = 'auto';
+            friendContainer.display = 'none';
+            container.appendChild(friendContainer);
+
+            //Chức năng cho searchButton
+            searchButton.addEventListener('click', async () => {
+                if (friendContainer.style.display === 'block') {
+                    friendContainer.style.display = 'none';
+                    return;
+                }
+                friendContainer.style.display = 'block';
+                friendContainer.innerHTML = '';
+                const friendList = await tienduyen.danhsachBanBe(); //Danh sách kiểu [{id: '12345', name: 'Tên bạn bè 1'}, {id: '67890', name: 'Tên bạn bè 2'}, ...]
+                for (const friend of friendList) {
+                    const friendDiv = document.createElement('div');
+                    const friendLabel = document.createElement('label');
+                    friendLabel.textContent = `${friend.name} (❤️${friend.thanMat})`;
+                    const friendCheckbox = document.createElement('input');
+                    friendCheckbox.type = 'checkbox';
+                    friendCheckbox.checked = inputList().includes(friend.id) ? true : false;
+                    friendCheckbox.addEventListener('change', () => {
+                        let currentIds = inputList();
+                        if (friendCheckbox.checked) {
+                            // Thêm id vào input
+                            if (!currentIds.includes(friend.id) && currentIds.length < 5) {
+                                currentIds.push(friend.id);
+                            } else {friendCheckbox.checked = false;
+                                showNotification('Chỉ được chọn tối đa 5 người nhận hoa!', 'error');
+                            }
+                        } else {
+                            // Xóa id khỏi input
+                            currentIds = currentIds.filter(id => id !== friend.id);
+                        }
+                        input.value = currentIds.join(';');
+                        localStorage.setItem(`tienDuyenInputValue_${accountId}`, input.value);
+                    });
+                    friendLabel.prepend(friendCheckbox);
+                    friendDiv.appendChild(friendLabel);
+                    friendContainer.appendChild(friendDiv);
+                }
             });
 
             //Khởi tạo input khi load
-            input.value = localStorage.getItem('tienDuyenInputValue') || '';
+            input.value = localStorage.getItem(`tienDuyenInputValue_${accountId}`) || '';
 
             // Lưu nút vào Map
             this.buttonMap.set('tienduyen', tienduyenButton);
@@ -4671,7 +4782,12 @@
                 if (this.luanvoTimeout) clearTimeout(this.luanvoTimeout);
                 return;
             }
-            await luanvo.startLuanVo();
+            const nonce = await getNonce();
+            if (!nonce) {
+                showNotification(' Lỗi: Không thể❌ lấy nonce cho Luận Võ.', 'error');
+                return;
+            }
+            await luanvo.startLuanVo(nonce);
             let timeTo21h = new Date();
             timeTo21h.setHours(21, 1, 0, 0);
             const delay = timeTo21h.getTime() - Date.now();
