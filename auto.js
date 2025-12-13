@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey 
-// @version       4.2
+// @version       4.3
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.gg/*
@@ -2550,7 +2550,7 @@
             // Bắt đầu vòng lặp để kiểm tra và thực hiện tác vụ liên tục
             while (true) {
                 // Kiểm tra thông tin trong mỏ
-                await new Promise(resolve => setTimeout(resolve, 1000)); // Đợi 1 giây để tránh spam quá nhanh
+                await new Promise(resolve => setTimeout(resolve, 300)); // Đợi 1 giây để tránh spam quá nhanh
                 let mineInfo = await this.getUsersInMine(targetMine.id);
                 if (!mineInfo) throw new Error('Lỗi lấy thông tin chi tiết trong mỏ');
                 const users = mineInfo.users || [];
@@ -2651,7 +2651,7 @@
                         console.log(`[Khoáng mạch] Mua linh quang phù...`);
                         await this.buyBuffItem(targetMine.id);
                         // Đợi một chút để server xử lý
-                        await new Promise(resolve => setTimeout(resolve, 1000));
+                        await new Promise(resolve => setTimeout(resolve, 300));
                         continue;
                     }
 
@@ -2741,7 +2741,7 @@
                         showNotification(`Nhận lì xì phòng cưới ${room.wedding_room_id} được <b>${liXi.data.amount} ${liXi.data.name}</b>!`, 'success')
                     }
                 }
-                await new Promise(r => setTimeout(r, 1000)); // chờ 1 giây tránh spam
+                await new Promise(r => setTimeout(r, 500)); // chờ 1 giây tránh spam
             }
         }
 
@@ -3991,23 +3991,26 @@
             autoTakeOverCheckbox.addEventListener('change', (e) => {
                 localStorage.setItem('khoangmach_auto_takeover', e.target.checked);
                 if (e.target.checked) {
-                    const khoangmach_auto_takeover_rotation = localStorage.getItem('khoangmach_auto_takeover_rotation') === 'true';
+                    const khoangmach_auto_takeover_rotation = 
+                        localStorage.getItem('khoangmach_auto_takeover_rotation') === 'true';
                     if (khoangmach_auto_takeover_rotation) {
-                        autoTakeOverCheckbox.checked = false;
-                        localStorage.setItem('khoangmach_auto_takeover', false);
-                        showNotification('Tự động đoạt mỏ đã được tắt vì bạn đã bật tự đảo key.', 'info');
-                                            }
+                        // ❌ TẮT autoTakeOverRotation khi bật autoTakeover
+                        autoTakeOverRotationCheckbox.checked = false;
+                        localStorage.setItem('khoangmach_auto_takeover_rotation', false);
+                    }
+                    showNotification('Tự động đoạt mỏ khi chưa buff: Bật', 'info');
                 } else {
-                const status = e.target.checked ? 'Bật' : 'Tắt';
-                showNotification(`Tự động đoạt mỏ khi chưa buff: ${status}`, 'info');
+                    const status = e.target.checked ? 'Bật' : 'Tắt';
+                    showNotification(`Tự động đoạt mỏ khi chưa buff: ${status}`,'info');
                 }
             });
-
+            
             autoTakeOverRotationCheckbox.addEventListener('change', (e) => {
                 localStorage.setItem('khoangmach_auto_takeover_rotation', e.target.checked);
                 const status = e.target.checked ? 'Bật' : 'Tắt';
-                showNotification(`Tự động đoạt mỏ khi có thể: ${status}`, 'info');
+                showNotification(`Tự động đoạt mỏ khi có thể: ${status}`,'info');
                 if (e.target.checked) {
+                    // ❌ TẮT autoTakeover khi bật autoTakeoverRotation
                     autoTakeOverCheckbox.checked = false;
                     localStorage.setItem('khoangmach_auto_takeover', false);
                 }
@@ -4151,10 +4154,14 @@
             buttonRow.appendChild(settingButton);
             buttonRow.appendChild(tienduyenButton);
             
+            const settingContainer = document.createElement('div');
+            settingContainer.classList.add('custom-script-khoang-mach-container');
+            settingContainer.style.display = 'none';
+            container.appendChild(settingContainer);
+
             const inputRow = document.createElement('div');
             inputRow.classList.add('custom-script-khoang-mach-button-row');
-            inputRow.style.display = 'none';
-            container.appendChild(inputRow);
+            settingContainer.appendChild(inputRow);
 
             const input = document.createElement('input');
             input.type = 'text';
@@ -4168,6 +4175,7 @@
             searchButton.textContent = '🔍';
             searchButton.classList.add('custom-script-hoang-vuc-settings-btn');
             inputRow.appendChild(searchButton);
+            settingContainer.appendChild(inputRow);
             
             // Xử lý sự kiện tìm kiếm id người nhận hoa
 
@@ -4184,7 +4192,7 @@
 
             // Ẩn/hiện inputRow
             settingButton.addEventListener('click', () => {
-                inputRow.style.display = inputRow.style.display === 'none' ? 'flex' : 'none';
+                settingContainer.style.display = settingContainer.style.display === 'none' ? 'flex' : 'none';
             }); 
 
             //Lưu input khi nhập
@@ -4205,7 +4213,7 @@
             friendContainer.style.maxHeight = '300px';
             friendContainer.style.overflowY = 'auto';
             friendContainer.display = 'none';
-            container.appendChild(friendContainer);
+            settingContainer.appendChild(friendContainer);
 
             //Chức năng cho searchButton
             searchButton.addEventListener('click', async () => {
