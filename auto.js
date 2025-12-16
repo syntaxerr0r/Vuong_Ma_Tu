@@ -3000,7 +3000,7 @@
 
             if (!dGet || dGet.error || !dGet.id) {
                 console.warn(`[Đua Top] ${dGet.message || 'Chưa đến giờ.'}`);
-                if (typeof showNotification === 'function') showNotification(dGet.message, 'warning');
+                showNotification(dGet.message, 'warn');
                 return;
             }
 
