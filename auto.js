@@ -1174,7 +1174,7 @@
             })
             const timeData = await timeResponse.json();
             if (timeData.success) {
-                const { time } = timeData.data.time_remaining;
+                const time = timeData.data.time_remaining;
                 taskTracker.adjustTaskTime(accountId,'thiluyen', timePlus(time));
             } else {
                 console.error('❌ Lỗi khi lấy thời gian còn lại:', timeData.data || 'Lỗi không xác định');
