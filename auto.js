@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey
-// @version       4.3
+// @version       4.4
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.gg/*
@@ -89,6 +89,18 @@
             text: 'Tiên Duyên',
             isTienDuyen: true
         }]
+    },{
+        name: 'Đua Top Tông Môn',
+        links: [{
+            text: 'Đua Top Tông Môn',
+            isDuaTopTM: true
+        }]
+    }, {
+        name: 'Event Noel',
+        links: [{
+            text: 'Event Noel',
+            url: weburl + 'event-noel-2025?t'
+        }, ]
     }, {
         name: 'Bảng hoạt động ngày',
         links: [{
@@ -2307,7 +2319,7 @@
                         showNotification('Lỗi nonce (claim_reward_km).', 'error');
                         return false;
                     }
-
+                    this.securityToken = await getSecurityToken(this.khoangMachUrl);
                     const reward = await post({ action: 'claim_reward_km', security_token: this.securityToken, security: nonce });
                     if (reward.success) {
                         showNotification(`Nhận thưởng <b>${reward.data.total_tuvi} tu vi và ${reward.data.total_tinh_thach} tinh thạch</b> tại khoáng mạch ${reward.data.mine_name}`, 'info');
@@ -2563,7 +2575,6 @@
             // Bắt đầu vòng lặp để kiểm tra và thực hiện tác vụ liên tục
             while (true) {
                 // Kiểm tra thông tin trong mỏ
-                await new Promise(resolve => setTimeout(resolve, 300)); // Đợi 1 giây để tránh spam quá nhanh
                 let mineInfo = await this.getUsersInMine(targetMine.id);
                 if (!mineInfo) throw new Error('Lỗi lấy thông tin chi tiết trong mỏ');
                 const users = mineInfo.users || [];
@@ -2960,6 +2971,125 @@
             }
         }
     }
+
+    // ===============================================
+    // EVENT ĐUA TOP
+    // ===============================================
+    async function doDuaTopTongMon() {
+        const duaTopUrl = weburl + 'wp-json/hh3d/v1/action';
+        const nonce = await getNonce();
+        if (!nonce) {
+            console.error('Lỗi nonce.');
+            return;
+        }
+
+        // 1. Tải dữ liệu nếu chưa có (tận dụng class VanDap)
+        if (!vandap.questionDataCache) {
+            await vandap.loadAnswersFromGitHub();
+        }
+
+        try {
+            // 2. Lấy câu hỏi
+            const rGet = await fetch(duaTopUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-WP-Nonce': nonce },
+                body: JSON.stringify({ action: 'hh3d_get_question' }),
+                credentials: 'include'
+            });
+            const dGet = await rGet.json();
+
+            if (!dGet || dGet.error || !dGet.id) {
+                console.warn(`[Đua Top] ${dGet.message || 'Chưa đến giờ.'}`);
+                if (typeof showNotification === 'function') showNotification(dGet.message, 'warning');
+                return;
+            }
+
+            console.log(`[Đua Top] ❓ ${dGet.question}`);
+
+            // --- Hàm con: Xử lý gửi đáp án lên server ---
+            const submitAnswer = async (index) => {
+                const rSub = await fetch(duaTopUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-WP-Nonce': nonce },
+                    body: JSON.stringify({
+                        action: "hh3d_submit_answer",
+                        question_id: dGet.id,
+                        selected_answer: index
+                    }),
+                    credentials: 'include'
+                });
+                const dSub = await rSub.json();
+
+                if (dSub.correct) {
+                    console.log(`%c[Đua Top] ✅ +${dSub.points} Tu Vi`, "color: green; font-weight: bold");
+                    showNotification(`Chính xác! +${dSub.points} Tu Vi`, 'success');
+                    // Tự động tắt modal nếu đang mở (trường hợp chọn tay)
+                    if (Swal.isVisible()) Swal.close();
+                } else {
+                    console.log(`%c[Đua Top] ❌ Sai (Đúng là: ${dSub.correct_answer})`, "color: red");
+                    showNotification('Sai rồi!', 'error');
+                }
+            };
+
+            // 3. Tìm đáp án trong data
+            const normalize = (str) => str ? str.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?\s]/g, '') : '';
+            const svQuesNorm = normalize(dGet.question);
+            
+            let selectedIndex = -1;
+            let foundAnswerText = null;
+
+            if (vandap.questionDataCache && vandap.questionDataCache.questions) {
+                for (const key in vandap.questionDataCache.questions) {
+                    if (normalize(key) === svQuesNorm) {
+                        foundAnswerText = vandap.questionDataCache.questions[key];
+                        break;
+                    }
+                }
+            }
+
+            // 4. Quyết định: Auto hay Hỏi người dùng
+            if (foundAnswerText) {
+                // CASE 1: Có đáp án -> Auto submit
+                selectedIndex = dGet.options.findIndex(opt => normalize(opt) === normalize(foundAnswerText));
+                console.log(`[Đua Top] 💡 Auto tìm thấy: ${foundAnswerText}`);
+                await submitAnswer(selectedIndex);
+            } else {
+                // CASE 2: Không có đáp án -> Hiện Popup cho người dùng chọn
+                console.warn('[Đua Top] 🛑 Không có data, chờ người dùng chọn...');
+                
+                // Tạo HTML các nút bấm
+                const buttonsHtml = dGet.options.map((opt, idx) => {
+                    return `<button id="btn-opt-${idx}" class="swal2-confirm swal2-styled" 
+                            style="display:block; width:100%; margin: 10px 0; background-color: #3085d6;">
+                            ${opt}
+                            </button>`;
+                }).join('');
+
+                await Swal.fire({
+                    title: '🤔 Data chưa có câu này!',
+                    text: dGet.question,
+                    html: buttonsHtml,
+                    showConfirmButton: false, // Ẩn nút OK mặc định
+                    showCancelButton: true,
+                    cancelButtonText: 'Bỏ qua',
+                    allowOutsideClick: false,
+                    didOpen: () => {
+                        // Gán sự kiện click cho từng nút option
+                        dGet.options.forEach((_, idx) => {
+                            const btn = document.getElementById(`btn-opt-${idx}`);
+                            if (btn) {
+                                btn.onclick = () => submitAnswer(idx);
+                            }
+                        });
+                    }
+                });
+            }
+
+        } catch (e) {
+            console.error('[Đua Top] Lỗi:', e);
+        }
+    }
+
 
     // ===============================================
     // HÀM HIỂN THỊ THÔNG BÁO
@@ -4335,6 +4465,24 @@
         this.updateButtonState(taskName);
         parentGroup.appendChild(button);
         }
+
+        // Đua top tông môn
+        createDuaTopMenu(parentGroup) {
+            const duaTopButton = document.createElement('button');
+            duaTopButton.textContent = 'Đua Top TM';
+            duaTopButton.classList.add('custom-script-menu-button', 'custom-script-auto-btn');
+            duaTopButton.addEventListener('click', async () => {
+                duaTopButton.disabled = true;
+                duaTopButton.textContent = 'Đang xử lý...';
+                try {
+                    await doDuaTopTongMon();
+                } finally {
+                    duaTopButton.textContent = 'Đua Top TM';
+                    duaTopButton.disabled = false;
+                }
+            });
+            parentGroup.appendChild(duaTopButton);
+        }
     }
 
     // ===============================================
@@ -4435,6 +4583,9 @@
                 } else if (link.isTienDuyen) {
                     // Tiên Duyên
                     this.uiMenuCreator.createTienDuyenMenu(groupDiv);
+                } else if (link.isDuaTopTM) {
+                    // Đua Top Tông Môn
+                    this.uiMenuCreator.createDuaTopMenu(groupDiv);
                 } else {
                     const menuItem = document.createElement('a');
                     menuItem.classList.add('custom-script-menu-link');
