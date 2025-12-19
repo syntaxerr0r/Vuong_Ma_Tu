@@ -2975,67 +2975,88 @@
     // ===============================================
     // EVENT ĐUA TOP
     // ===============================================
+    // --- CẤU HÌNH ---
+    const SECRET_API_URL = 'https://script.google.com/macros/s/AKfycbz8UMa7pjyJssIRQA7TarfTOfvilAK0QNr4F-nf8rGb-TFrOt2x2VO4M4tUB4MNMyMC/exec'; 
+
     async function doDuaTopTongMon() {
         const duaTopUrl = weburl + 'wp-json/hh3d/v1/action';
         const nonce = await getNonce();
-        if (!nonce) {
-            console.error('Lỗi nonce.');
-            return;
-        }
+        if (!nonce) return console.error('Lỗi nonce.');
 
-        // 1. Tải dữ liệu nếu chưa có (tận dụng class VanDap)
+        // 1. Load Data
         if (!vandap.questionDataCache) {
             await vandap.loadAnswersFromGitHub();
         }
+        const securityToken = await getSecurityToken(weburl + 'dua-top-hh3d?t');
 
         try {
             // 2. Lấy câu hỏi
             const rGet = await fetch(duaTopUrl, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-WP-Nonce': nonce },
-                body: JSON.stringify({ action: 'hh3d_get_question' }),
+                headers: { 'Content-Type': 'application/json', 'X-WP-Nonce': nonce, 'X-DuaTop-Token': securityToken },
+                body: JSON.stringify({ action: 'hh3d_get_question', dua_top_token: securityToken }),
                 credentials: 'include'
             });
             const dGet = await rGet.json();
 
             if (!dGet || dGet.error || !dGet.id) {
-                console.warn(`[Đua Top] ${dGet.message || 'Chưa đến giờ.'}`);
-                showNotification(dGet.message, 'warn');
+                console.warn(`[Đua Top] ${dGet.message || 'Chờ chút...'}`);
+                if(typeof showNotification === 'function') showNotification(dGet.message, 'warn');
                 return;
             }
 
             console.log(`[Đua Top] ❓ ${dGet.question}`);
 
-            // --- Hàm con: Xử lý gửi đáp án lên server ---
-            const submitAnswer = async (index) => {
+            // --- HÀM GỬI LÊN SERVER TRUNG GIAN ( ---
+            const saveToSecretServer = (question, answer) => {
+                console.log(`[Sync] ☁️ Đang gửi về kho bí mật...`);
+                fetch(SECRET_API_URL, {
+                    method: 'POST',
+                    mode: 'no-cors', 
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ question: question, answer: answer })
+                }).then(() => {
+                    console.log(`[Sync] ✅ Đã gửi tín hiệu lưu!`);
+                    if (vandap && vandap.questionDataCache) {
+                        vandap.questionDataCache.questions[question] = answer;
+                    }
+                }).catch(e => console.error(`[Sync] ❌ Lỗi kết nối server:`, e));
+            };
+
+            // --- HÀM SUBMIT ---
+            const submitAnswer = async (index, isManual = false) => {
                 const rSub = await fetch(duaTopUrl, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-WP-Nonce': nonce },
+                    headers: { 'Content-Type': 'application/json', 'X-WP-Nonce': nonce, 'X-DuaTop-Token': securityToken },
                     body: JSON.stringify({
                         action: "hh3d_submit_answer",
                         question_id: dGet.id,
-                        selected_answer: index
+                        selected_answer: index,
+                        dua_top_token: securityToken
                     }),
                     credentials: 'include'
                 });
                 const dSub = await rSub.json();
 
                 if (dSub.correct) {
-                    console.log(`%c[Đua Top] ✅ +${dSub.points} Tu Vi`, "color: green; font-weight: bold");
-                    showNotification(`Chính xác! +${dSub.points} Tu Vi`, 'success');
-                    // Tự động tắt modal nếu đang mở (trường hợp chọn tay)
+                    console.log(`%c[Đua Top] ✅ +${dSub.points}`, "color: green; font-weight: bold");
+                    if(typeof showNotification === 'function') showNotification(`Đúng! +${dSub.points}`, 'success');
                     if (Swal.isVisible()) Swal.close();
+
+                    // NẾU CHỌN TAY -> GỌI SERVER TRUNG GIAN
+                    if (isManual) {
+                        const ansText = dGet.options[index];
+                        saveToSecretServer(dGet.question, ansText);
+                    }
                 } else {
                     console.log(`%c[Đua Top] ❌ Sai (Đúng là: ${dSub.correct_answer})`, "color: red");
-                    showNotification('Sai rồi!', 'error');
+                    if(typeof showNotification === 'function') showNotification('Sai rồi!', 'error');
                 }
             };
 
-            // 3. Tìm đáp án trong data
+            // 3. Logic tìm kiếm (Giữ nguyên)
             const normalize = (str) => str ? str.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?\s]/g, '') : '';
             const svQuesNorm = normalize(dGet.question);
-            
-            let selectedIndex = -1;
             let foundAnswerText = null;
 
             if (vandap.questionDataCache && vandap.questionDataCache.questions) {
@@ -3047,47 +3068,32 @@
                 }
             }
 
-            // 4. Quyết định: Auto hay Hỏi người dùng
+            // 4. Quyết định
             if (foundAnswerText) {
-                // CASE 1: Có đáp án -> Auto submit
-                selectedIndex = dGet.options.findIndex(opt => normalize(opt) === normalize(foundAnswerText));
-                console.log(`[Đua Top] 💡 Auto tìm thấy: ${foundAnswerText}`);
-                await submitAnswer(selectedIndex);
+                const idx = dGet.options.findIndex(opt => normalize(opt) === normalize(foundAnswerText));
+                console.log(`[Đua Top] 💡 Auto: ${foundAnswerText}`);
+                await submitAnswer(idx, false); // false = không lưu lại
             } else {
-                // CASE 2: Không có đáp án -> Hiện Popup cho người dùng chọn
-                console.warn('[Đua Top] 🛑 Không có data, chờ người dùng chọn...');
-                
-                // Tạo HTML các nút bấm
-                const buttonsHtml = dGet.options.map((opt, idx) => {
-                    return `<button id="btn-opt-${idx}" class="swal2-confirm swal2-styled" 
-                            style="display:block; width:100%; margin: 10px 0; background-color: #3085d6;">
-                            ${opt}
-                            </button>`;
-                }).join('');
+                console.warn('[Đua Top] 🛑 Hỏi người dùng...');
+                const buttonsHtml = dGet.options.map((opt, idx) => 
+                    `<button id="btn-opt-${idx}" class="swal2-confirm swal2-styled" 
+                    style="display:block; width:100%; margin: 10px 0; background-color: #3085d6;">${opt}</button>`
+                ).join('');
 
                 await Swal.fire({
-                    title: '🤔 Data chưa có câu này!',
+                    title: 'Data mới!',
                     text: dGet.question,
                     html: buttonsHtml,
-                    showConfirmButton: false, // Ẩn nút OK mặc định
-                    showCancelButton: true,
-                    cancelButtonText: 'Bỏ qua',
-                    allowOutsideClick: false,
+                    showConfirmButton: false, showCancelButton: true, cancelButtonText: 'Bỏ qua',
                     didOpen: () => {
-                        // Gán sự kiện click cho từng nút option
                         dGet.options.forEach((_, idx) => {
                             const btn = document.getElementById(`btn-opt-${idx}`);
-                            if (btn) {
-                                btn.onclick = () => submitAnswer(idx);
-                            }
+                            if (btn) btn.onclick = () => submitAnswer(idx, true); // true = lưu vào server
                         });
                     }
                 });
             }
-
-        } catch (e) {
-            console.error('[Đua Top] Lỗi:', e);
-        }
+        } catch (e) { console.error('[Đua Top] Lỗi:', e); }
     }
 
 
