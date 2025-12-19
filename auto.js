@@ -373,7 +373,8 @@
                 luanvo: { battle_joined: false, auto_accept: false, done: false },
                 khoangmach: {done: false, nextTime: null},
                 tienduyen: {done: false, last_check: null},
-                hoatdongngay: {done: false}
+                hoatdongngay: {done: false},
+                event: {nextTime: null}
             };
 
             if (accountData.lastUpdatedDate !== today) {
@@ -3000,8 +3001,18 @@
             const dGet = await rGet.json();
 
             if (!dGet || dGet.error || !dGet.id) {
-                console.warn(`[Đua Top] ${dGet.message || 'Chờ chút...'}`);
-                if(typeof showNotification === 'function') showNotification(dGet.message, 'warn');
+                showNotification(dGet.message, 'warn');
+                if (dGet.message && dGet.message.includes('Chưa đến thời gian kế tiếp')) {
+                    //message: "⏳ Chưa đến thời gian kế tiếp! Vui lòng chờ 04 giờ 09 phút 21 giây."
+                    const nextTimeMatch = dGet.message.match(/(\d{2}) giờ (\d{2}) phút (\d{2}) giây/);
+                    if (nextTimeMatch) {
+                        const hours = parseInt(nextTimeMatch[1], 10);
+                        const minutes = parseInt(nextTimeMatch[2], 10);
+                        const seconds = parseInt(nextTimeMatch[3], 10);
+                        const nextTime = Date.now() + ((hours * 3600) + (minutes * 60) + seconds) * 1000;
+                        taskTracker.adjustTaskTime(accountId, 'event', nextTime);
+                    }
+                }
                 return;
             }
 
@@ -3039,8 +3050,8 @@
                 const dSub = await rSub.json();
 
                 if (dSub.correct) {
-                    console.log(`%c[Đua Top] ✅ +${dSub.points}`, "color: green; font-weight: bold");
-                    if(typeof showNotification === 'function') showNotification(`Đúng! +${dSub.points}`, 'success');
+                    showNotification(`[Đua Top] Đúng! +${dSub.points}`, 'success');
+                    taskTracker.adjustTaskTime(accountId, 'event', Date.now() + 6.5*60*60*1000 + 30*1000);
                     if (Swal.isVisible()) Swal.close();
 
                     // NẾU CHỌN TAY -> GỌI SERVER TRUNG GIAN
@@ -3049,8 +3060,8 @@
                         saveToSecretServer(dGet.question, ansText);
                     }
                 } else {
-                    console.log(`%c[Đua Top] ❌ Sai (Đúng là: ${dSub.correct_answer})`, "color: red");
-                    if(typeof showNotification === 'function') showNotification('Sai rồi!', 'error');
+                    showNotification(`[Đua Top] Sai rồi!`, 'error');
+                    taskTracker.adjustTaskTime(accountId, 'event', Date.now() + 5*60*1000 + 15*1000);
                 }
             };
 
@@ -4760,6 +4771,19 @@
             this.scheduleHoatDongNgay();
             this.selfSchedule();
             this.applyPromoCode();
+        }
+
+        async eventSchedule() {
+            const now = Date.now();
+            const nextEventTime = taskTracker.getNextTime(accountId, 'event');
+            if (nextEventTime && now >= nextEventTime) {
+                console.log("[Auto] Đã đến giờ sự kiện. Đang thực hiện...");
+                try {
+                    await doDuaTopTongMon();
+                } catch (error) {
+                    console.error("[Auto] Lỗi khi thực hiện sự kiện:", error);
+                }
+            }
         }
 
         // Tự nhập mã thưởng

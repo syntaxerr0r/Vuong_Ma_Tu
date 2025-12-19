@@ -1,17 +1,3 @@
-// ==UserScript==
-// @name          HH3D - Menu Tùy Chỉnh
-// @namespace     Tampermonkey
-// @version       4.4
-// @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
-// @author        Dr. Trune
-// @match         https://hoathinh3d.gg/*
-// @run-at        document-start
-// @grant         GM_xmlhttpRequest
-// @connect       raw.githubusercontent.com
-// ==/UserScript==
-(async function() {
-    'use strict';
-
     console.log('%c[HH3D Script] Tải thành công. Đang khởi tạo UI tùy chỉnh.', 'background: #222; color: #bada55; padding: 2px 5px; border-radius: 3px;');
 
     // ===============================================
@@ -373,7 +359,8 @@
                 luanvo: { battle_joined: false, auto_accept: false, done: false },
                 khoangmach: {done: false, nextTime: null},
                 tienduyen: {done: false, last_check: null},
-                hoatdongngay: {done: false}
+                hoatdongngay: {done: false},
+                event: {nextTime: null}
             };
 
             if (accountData.lastUpdatedDate !== today) {
@@ -3000,8 +2987,18 @@
             const dGet = await rGet.json();
 
             if (!dGet || dGet.error || !dGet.id) {
-                console.warn(`[Đua Top] ${dGet.message || 'Chờ chút...'}`);
-                if(typeof showNotification === 'function') showNotification(dGet.message, 'warn');
+                showNotification(dGet.message, 'warn');
+                if (dGet.message && dGet.message.includes('Chưa đến thời gian kế tiếp')) {
+                    //message: "⏳ Chưa đến thời gian kế tiếp! Vui lòng chờ 04 giờ 09 phút 21 giây."
+                    const nextTimeMatch = dGet.message.match(/(\d{2}) giờ (\d{2}) phút (\d{2}) giây/);
+                    if (nextTimeMatch) {
+                        const hours = parseInt(nextTimeMatch[1], 10);
+                        const minutes = parseInt(nextTimeMatch[2], 10);
+                        const seconds = parseInt(nextTimeMatch[3], 10);
+                        const nextTime = Date.now() + ((hours * 3600) + (minutes * 60) + seconds) * 1000;
+                        taskTracker.adjustTaskTime(accountId, 'event', nextTime);
+                    }
+                }
                 return;
             }
 
@@ -3039,8 +3036,8 @@
                 const dSub = await rSub.json();
 
                 if (dSub.correct) {
-                    console.log(`%c[Đua Top] ✅ +${dSub.points}`, "color: green; font-weight: bold");
-                    if(typeof showNotification === 'function') showNotification(`Đúng! +${dSub.points}`, 'success');
+                    showNotification(`[Đua Top] Đúng! +${dSub.points}`, 'success');
+                    taskTracker.adjustTaskTime(accountId, 'event', Date.now() + 6.5*60*60*1000 + 30*1000);
                     if (Swal.isVisible()) Swal.close();
 
                     // NẾU CHỌN TAY -> GỌI SERVER TRUNG GIAN
@@ -3049,8 +3046,8 @@
                         saveToSecretServer(dGet.question, ansText);
                     }
                 } else {
-                    console.log(`%c[Đua Top] ❌ Sai (Đúng là: ${dSub.correct_answer})`, "color: red");
-                    if(typeof showNotification === 'function') showNotification('Sai rồi!', 'error');
+                    showNotification(`[Đua Top] Sai rồi!`, 'error');
+                    taskTracker.adjustTaskTime(accountId, 'event', Date.now() + 5*60*1000 + 15*1000);
                 }
             };
 
@@ -4762,6 +4759,19 @@
             this.applyPromoCode();
         }
 
+        async eventSchedule() {
+            const now = Date.now();
+            const nextEventTime = taskTracker.getNextTime(accountId, 'event');
+            if (nextEventTime && now >= nextEventTime) {
+                console.log("[Auto] Đã đến giờ sự kiện. Đang thực hiện...");
+                try {
+                    await doDuaTopTongMon();
+                } catch (error) {
+                    console.error("[Auto] Lỗi khi thực hiện sự kiện:", error);
+                }
+            }
+        }
+
         // Tự nhập mã thưởng
         async applyPromoCode() {
             const promoCodeSaved = localStorage.getItem(`promo_code_${accountId}`) || '';
@@ -5560,8 +5570,6 @@
             mainObserver.observe(document.body, { childList: true, subtree: true });
         }
     }
-
-
     // ===============================================
     // Bộ lọc tông môn
     // ===============================================
@@ -5656,6 +5664,9 @@
         showNotification('[HH3D] ⚠️ Tông môn không hợp lệ. Vui lòng tham gia tông môn hợp lệ để sử dụng script.', 'error', 3000);
         return;
     }
+    // ===============================================
+    // KHỞI TẠO SCRIPT
+    // ===============================================
     const taskTracker = new TaskTracker();
     const accountId = await getAccountId();
     if (accountId) {
@@ -5692,4 +5703,3 @@
         const hienTuviKM = new hienTuviKhoangMach();
         hienTuviKM.startUp();
     }
-})();
