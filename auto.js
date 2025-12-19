@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey
-// @version       4.5
+// @version       4.6
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.gg/*
