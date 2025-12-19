@@ -3092,7 +3092,7 @@
                 ).join('');
 
                 await Swal.fire({
-                    title: 'Data mới!',
+                    title: dGet.question,
                     text: dGet.question,
                     html: buttonsHtml,
                     showConfirmButton: false, showCancelButton: true, cancelButtonText: 'Bỏ qua',
