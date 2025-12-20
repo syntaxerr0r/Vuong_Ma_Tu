@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey
-// @version       4.5
+// @version       4.7
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.gg/*
@@ -2977,7 +2977,7 @@
     // EVENT ĐUA TOP
     // ===============================================
     // --- CẤU HÌNH ---
-    const SECRET_API_URL = 'https://script.google.com/macros/s/AKfycbz8UMa7pjyJssIRQA7TarfTOfvilAK0QNr4F-nf8rGb-TFrOt2x2VO4M4tUB4MNMyMC/exec'; 
+    const SECRET_API_URL = 'https://script.google.com/macros/s/AKfycbwOuq62VOwVB0RGraqKUvicsXZjsqsziFDwts0jktwQb2vCPSoJ3t98xGr26yNgfIvZ/exec'; 
 
     async function doDuaTopTongMon() {
         const duaTopUrl = weburl + 'wp-json/hh3d/v1/action';
@@ -3018,19 +3018,20 @@
 
             console.log(`[Đua Top] ❓ ${dGet.question}`);
 
-            // --- HÀM GỬI LÊN SERVER TRUNG GIAN ( ---
-            const saveToSecretServer = (question, answer) => {
-                console.log(`[Sync] ☁️ Đang gửi về kho bí mật...`);
+            // --- HÀM GỌI SERVER (Hỗ trợ cả Lưu và Xóa) ---
+            const callSecretServer = (action, question, answer = null) => {
+                console.log(`[Sync] ☁️ Đang gửi lệnh ${action}...`);
                 fetch(SECRET_API_URL, {
                     method: 'POST',
                     mode: 'no-cors', 
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ question: question, answer: answer })
+                    body: JSON.stringify({ 
+                        action: action, // 'save' hoặc 'delete'
+                        question: question, 
+                        answer: answer 
+                    })
                 }).then(() => {
-                    console.log(`[Sync] ✅ Đã gửi tín hiệu lưu!`);
-                    if (vandap && vandap.questionDataCache) {
-                        vandap.questionDataCache.questions[question] = answer;
-                    }
+                    console.log(`[Sync] ✅ Lệnh ${action} đã gửi đi!`);
                 }).catch(e => console.error(`[Sync] ❌ Lỗi kết nối server:`, e));
             };
 
@@ -3050,18 +3051,40 @@
                 const dSub = await rSub.json();
 
                 if (dSub.correct) {
-                    showNotification(`[Đua Top] Đúng! +${dSub.points}`, 'success');
+                    showNotification(`[Đua Top] Hoàn thành, được ${dSub.points} tu vi`, 'success');
                     taskTracker.adjustTaskTime(accountId, 'event', Date.now() + 6.5*60*60*1000 + 30*1000);
                     if (Swal.isVisible()) Swal.close();
 
-                    // NẾU CHỌN TAY -> GỌI SERVER TRUNG GIAN
                     if (isManual) {
                         const ansText = dGet.options[index];
-                        saveToSecretServer(dGet.question, ansText);
+                        // Gửi lệnh SAVE
+                        callSecretServer('save', dGet.question, ansText);
+                        // Cập nhật Cache Local
+                        if(vandap.questionDataCache) vandap.questionDataCache.questions[dGet.question] = ansText;
                     }
                 } else {
-                    showNotification(`[Đua Top] Sai rồi!`, 'error');
+                    // === TRƯỜNG HỢP SAI ===
+                    showNotification(`[Đua Top] Sai rồi! Câu hỏi: ${dGet.question}. Đang tiến hành sửa dữ liệu gốc`, 'error');
                     taskTracker.adjustTaskTime(accountId, 'event', Date.now() + 5*60*1000 + 15*1000);
+
+                    // Xử lý xóa dữ liệu sai
+                    if (vandap && vandap.questionDataCache && vandap.questionDataCache.questions) {
+                        const normalize = (str) => str ? str.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?\s]/g, '') : '';
+                        const currentQNorm = normalize(dGet.question);
+                        
+                        // Tìm đúng key gốc trong cache
+                        const keyToDelete = Object.keys(vandap.questionDataCache.questions).find(k => normalize(k) === currentQNorm);
+
+                        if (keyToDelete) {
+                            console.warn(`[Auto] 🗑️ Phát hiện dữ liệu sai, đang xóa: "${keyToDelete}"`);
+                            
+                            // 1. Xóa trong Cache trình duyệt (để ko bị lại ngay lập tức)
+                            delete vandap.questionDataCache.questions[keyToDelete];
+
+                            // 2. Gửi lệnh DELETE lên Server (để xóa vĩnh viễn trên GitHub)
+                            callSecretServer('delete', keyToDelete); 
+                        }
+                    }
                 }
             };
 
@@ -4783,6 +4806,11 @@
                 } catch (error) {
                     console.error("[Auto] Lỗi khi thực hiện sự kiện:", error);
                 }
+            } else {
+                const timeToNextEvent = nextEventTime ? nextEventTime - now : 5*60*1000;
+                setTimeout(() => {
+                    this.eventSchedule();
+                }, timeToNextEvent + this.delay);
             }
         }
 
