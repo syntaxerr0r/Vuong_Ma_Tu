@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey
-// @version       4.8
+// @version       4.9
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.gg/*
@@ -1788,7 +1788,7 @@
                         await new Promise(resolve => setTimeout(resolve, 500));
                         if (await this.attackHoangVucBoss(boss.id, nonce)){
                             taskTracker.adjustTaskTime(accountId, 'hoangvuc', timePlus('15:02'));   //--------- 15 phút cho lần sau -----------//
-                            if (this.remainingAttacks <= 1) {
+                            if (remainingAttacks <= 1) {
                             taskTracker.markTaskDone(accountId, 'hoangvuc');
                             };
                         };
