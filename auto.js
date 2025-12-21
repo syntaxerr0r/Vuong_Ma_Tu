@@ -1,10 +1,11 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey
-// @version       4.9
+// @version       4.9.2
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.gg/*
+// @require       https://cdn.jsdelivr.net/npm/sweetalert2@11.26.12/dist/sweetalert2.all.min.js
 // @run-at        document-start
 // @grant         GM_xmlhttpRequest
 // @connect       raw.githubusercontent.com
