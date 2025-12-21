@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey
-// @version       4.7
+// @version       4.8
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.gg/*
@@ -603,14 +603,19 @@
          * @returns {Promise<boolean>} True nếu câu trả lời được gửi thành công, ngược lại là false.
          */
         async checkAnswerAndSubmit(question, headers) {
-            const normalizedIncomingQuestion = question.question.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?\s]/g, '');
+            // 1. Định nghĩa các hàm helper (như logic Đua Top)
+            // Normalize: Xóa hết ký tự đặc biệt và khoảng trắng để so sánh tuyệt đối
+            const normalize = (str) => str ? str.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?\s]/g, '') : '';
+            
+            // Tokenize: Giữ lại khoảng trắng để tách từ, dùng cho việc tính điểm
+            const tokenize = (str) => str ? str.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?]/g, ' ').trim().split(/\s+/).filter(x => x) : [];
 
+            const normalizedIncomingQuestion = normalize(question.question);
             let foundAnswer = null;
 
-            // Tìm câu trả lời trong dữ liệu cache
+            // 2. Tìm câu trả lời trong dữ liệu cache
             for (const storedQuestionKey in this.questionDataCache.questions) {
-                const normalizedStoredQuestionKey = storedQuestionKey.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?\s]/g, '');
-                if (normalizedStoredQuestionKey === normalizedIncomingQuestion) {
+                if (normalize(storedQuestionKey) === normalizedIncomingQuestion) {
                     foundAnswer = this.questionDataCache.questions[storedQuestionKey];
                     break;
                 }
@@ -621,18 +626,45 @@
                 return false;
             }
 
-            // Tìm chỉ mục của câu trả lời đúng trong các lựa chọn do máy chủ cung cấp
-            const answerIndex = question.options.findIndex(option =>
-                option.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?\s]/g, '') ===
-                foundAnswer.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?\s]/g, '')
+            // 3. Tìm chỉ mục (Index) trong options
+            // Ưu tiên 1: Tìm chính xác (Exact Match)
+            let answerIndex = question.options.findIndex(option => 
+                normalize(option) === normalize(foundAnswer)
             );
 
+            // Ưu tiên 2: Nếu không thấy, tìm theo điểm trùng từ (Similarity Score)
             if (answerIndex === -1) {
-                showNotification(`Vấn Đáp: Câu hỏi: <i>${question.question}</i> không có đáp án đúng trong server.`, 'error');
+                console.warn(`[Vấn Đáp] ⚠️ Không khớp chính xác option nào. Đang tính điểm trùng từ cho: "${foundAnswer}"`);
+                
+                let maxScore = -1;
+                let bestIdx = -1;
+                const targetTokens = tokenize(foundAnswer);
+
+                question.options.forEach((option, idx) => {
+                    const optTokens = tokenize(option);
+                    // Đếm số từ trong Option xuất hiện trong Answer Cache
+                    const intersection = optTokens.filter(token => targetTokens.includes(token));
+                    const score = intersection.length;
+
+                    if (score > maxScore) {
+                        maxScore = score;
+                        bestIdx = idx;
+                    }
+                });
+
+                // Chỉ chọn nếu có ít nhất 1 từ trùng (score > 0)
+                if (bestIdx > -1 && maxScore > 0) {
+                    answerIndex = bestIdx;
+                    console.log(`[Vấn Đáp] 🎯 Chọn option theo điểm cao nhất (${maxScore}): ${question.options[bestIdx]}`);
+                }
+            }
+
+            if (answerIndex === -1) {
+                showNotification(`Vấn Đáp: Câu hỏi: <i>${question.question}</i> có đáp án mẫu là "${foundAnswer}" nhưng không khớp option nào trong server.`, 'error');
                 return false;
             }
 
-            // Gửi câu trả lời
+            // 4. Gửi câu trả lời
             const payloadSubmitAnswer = new URLSearchParams();
             payloadSubmitAnswer.append('action', 'save_quiz_result');
             payloadSubmitAnswer.append('question_id', question.id);
@@ -658,8 +690,6 @@
                 return false;
             }
         }
-
-
 
 
         /**
@@ -3003,7 +3033,6 @@
             if (!dGet || dGet.error || !dGet.id) {
                 showNotification(dGet.message, 'warn');
                 if (dGet.message && dGet.message.includes('Chưa đến thời gian kế tiếp')) {
-                    //message: "⏳ Chưa đến thời gian kế tiếp! Vui lòng chờ 04 giờ 09 phút 21 giây."
                     const nextTimeMatch = dGet.message.match(/(\d{2}) giờ (\d{2}) phút (\d{2}) giây/);
                     if (nextTimeMatch) {
                         const hours = parseInt(nextTimeMatch[1], 10);
@@ -3018,21 +3047,20 @@
 
             console.log(`[Đua Top] ❓ ${dGet.question}`);
 
-            // --- HÀM GỌI SERVER (Hỗ trợ cả Lưu và Xóa) ---
+            // --- HÀM GỌI SERVER ---
             const callSecretServer = (action, question, answer = null) => {
                 console.log(`[Sync] ☁️ Đang gửi lệnh ${action}...`);
                 fetch(SECRET_API_URL, {
                     method: 'POST',
-                    mode: 'no-cors', 
+                    mode: 'no-cors',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        action: action, // 'save' hoặc 'delete'
-                        question: question, 
-                        answer: answer 
+                    body: JSON.stringify({
+                        action: action,
+                        question: question,
+                        answer: answer
                     })
-                }).then(() => {
-                    console.log(`[Sync] ✅ Lệnh ${action} đã gửi đi!`);
-                }).catch(e => console.error(`[Sync] ❌ Lỗi kết nối server:`, e));
+                }).then(() => console.log(`[Sync] ✅ Lệnh ${action} đã gửi đi!`))
+                .catch(e => console.error(`[Sync] ❌ Lỗi kết nối server:`, e));
             };
 
             // --- HÀM SUBMIT ---
@@ -3052,44 +3080,39 @@
 
                 if (dSub.correct) {
                     showNotification(`[Đua Top] Hoàn thành, được ${dSub.points} tu vi`, 'success');
-                    taskTracker.adjustTaskTime(accountId, 'event', Date.now() + 6.5*60*60*1000 + 30*1000);
+                    taskTracker.adjustTaskTime(accountId, 'event', Date.now() + 6.5 * 60 * 60 * 1000 + 30 * 1000);
                     if (Swal.isVisible()) Swal.close();
 
                     if (isManual) {
                         const ansText = dGet.options[index];
-                        // Gửi lệnh SAVE
                         callSecretServer('save', dGet.question, ansText);
-                        // Cập nhật Cache Local
-                        if(vandap.questionDataCache) vandap.questionDataCache.questions[dGet.question] = ansText;
+                        if (vandap.questionDataCache) vandap.questionDataCache.questions[dGet.question] = ansText;
                     }
                 } else {
-                    // === TRƯỜNG HỢP SAI ===
                     showNotification(`[Đua Top] Sai rồi! Câu hỏi: ${dGet.question}. Đang tiến hành sửa dữ liệu gốc`, 'error');
-                    taskTracker.adjustTaskTime(accountId, 'event', Date.now() + 5*60*1000 + 15*1000);
+                    taskTracker.adjustTaskTime(accountId, 'event', Date.now() + 5 * 60 * 1000 + 15 * 1000);
 
-                    // Xử lý xóa dữ liệu sai
                     if (vandap && vandap.questionDataCache && vandap.questionDataCache.questions) {
                         const normalize = (str) => str ? str.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?\s]/g, '') : '';
                         const currentQNorm = normalize(dGet.question);
-                        
-                        // Tìm đúng key gốc trong cache
                         const keyToDelete = Object.keys(vandap.questionDataCache.questions).find(k => normalize(k) === currentQNorm);
 
                         if (keyToDelete) {
                             console.warn(`[Auto] 🗑️ Phát hiện dữ liệu sai, đang xóa: "${keyToDelete}"`);
-                            
-                            // 1. Xóa trong Cache trình duyệt (để ko bị lại ngay lập tức)
                             delete vandap.questionDataCache.questions[keyToDelete];
-
-                            // 2. Gửi lệnh DELETE lên Server (để xóa vĩnh viễn trên GitHub)
-                            callSecretServer('delete', keyToDelete); 
+                            callSecretServer('delete', keyToDelete);
                         }
                     }
                 }
             };
 
-            // 3. Logic tìm kiếm (Giữ nguyên)
+            // 3. Logic tìm kiếm
+            // Normalize 1: Xóa hết ký tự đặc biệt VÀ khoảng trắng (dùng để tìm key câu hỏi)
             const normalize = (str) => str ? str.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?\s]/g, '') : '';
+            
+            // Tokenize: Giữ lại khoảng trắng để tách từ (dùng để so sánh điểm trùng lặp đáp án)
+            const tokenize = (str) => str ? str.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?]/g, ' ').trim().split(/\s+/).filter(x => x) : [];
+
             const svQuesNorm = normalize(dGet.question);
             let foundAnswerText = null;
 
@@ -3104,25 +3127,84 @@
 
             // 4. Quyết định
             if (foundAnswerText) {
-                const idx = dGet.options.findIndex(opt => normalize(opt) === normalize(foundAnswerText));
-                console.log(`[Đua Top] 💡 Auto: ${foundAnswerText}`);
-                await submitAnswer(idx, false); // false = không lưu lại
+                console.log(`[Đua Top] 💡 Dữ liệu gốc: "${foundAnswerText}"`);
+                
+                // Bước 1: Thử tìm chính xác
+                let idx = dGet.options.findIndex(opt => normalize(opt) === normalize(foundAnswerText));
+
+                // Bước 2: Tìm theo điểm trùng từ
+                if (idx === -1) {
+                    console.warn('[Đua Top] ⚠️ Không khớp chính xác, tính điểm trùng từ...');
+                    let maxScore = -1;
+                    let bestIdx = -1;
+                    const targetTokens = tokenize(foundAnswerText);
+
+                    dGet.options.forEach((opt, i) => {
+                        const optTokens = tokenize(opt);
+                        const intersection = optTokens.filter(token => targetTokens.includes(token));
+                        const score = intersection.length; 
+                        if (score > maxScore) {
+                            maxScore = score;
+                            bestIdx = i;
+                        }
+                    });
+
+                    if (bestIdx > -1 && maxScore > 0) {
+                        idx = bestIdx;
+                    }
+                }
+
+                if (idx > -1) {
+                    await submitAnswer(idx, false);
+                } else {
+                    console.warn('[Đua Top] 🛑 Có đáp án mẫu nhưng không khớp option.');
+                    
+                    // --- SỬA LỖI HIỂN THỊ TẠI ĐÂY ---
+                    // Đưa text gợi ý vào thành HTML
+                    const buttonsHtml = dGet.options.map((opt, i) =>
+                        `<button id="btn-opt-${i}" class="swal2-confirm swal2-styled" 
+                        style="display:block; width:100%; margin: 5px 0; background-color: #3085d6;">${opt}</button>`
+                    ).join('');
+                    
+                    // Tạo đoạn HTML chứa cả Gợi ý và Nút
+                    const contentHtml = `
+                        <div style="margin-bottom: 15px; color: #d33; font-weight: bold; border-bottom: 1px solid #eee; padding-bottom: 10px;">
+                            Gợi ý: ${foundAnswerText}
+                        </div>
+                        <div>${buttonsHtml}</div>
+                    `;
+
+                    await Swal.fire({
+                        title: dGet.question,
+                        html: contentHtml, // Dùng duy nhất html
+                        showConfirmButton: false, showCancelButton: true, cancelButtonText: 'Bỏ qua',
+                        didOpen: () => {
+                            dGet.options.forEach((_, i) => {
+                                const btn = document.getElementById(`btn-opt-${i}`);
+                                if (btn) btn.onclick = () => submitAnswer(i, true);
+                            });
+                        }
+                    });
+                }
+
             } else {
-                console.warn('[Đua Top] 🛑 Hỏi người dùng...');
-                const buttonsHtml = dGet.options.map((opt, idx) => 
+                console.warn('[Đua Top] 🛑 Hỏi người dùng (Chưa có dữ liệu)...');
+                
+                // --- SỬA LỖI HIỂN THỊ TẠI ĐÂY (TRƯỜNG HỢP KHÔNG CÓ DATA) ---
+                const buttonsHtml = dGet.options.map((opt, idx) =>
                     `<button id="btn-opt-${idx}" class="swal2-confirm swal2-styled" 
-                    style="display:block; width:100%; margin: 10px 0; background-color: #3085d6;">${opt}</button>`
+                    style="display:block; width:100%; margin: 5px 0; background-color: #3085d6;">${opt}</button>`
                 ).join('');
 
                 await Swal.fire({
                     title: dGet.question,
-                    text: dGet.question,
-                    html: buttonsHtml,
+                    // Không dùng 'text' nữa vì tiêu đề đã có câu hỏi rồi, hoặc nếu muốn hiện lại câu hỏi thì đưa vào html
+                    html: buttonsHtml, 
                     showConfirmButton: false, showCancelButton: true, cancelButtonText: 'Bỏ qua',
                     didOpen: () => {
                         dGet.options.forEach((_, idx) => {
                             const btn = document.getElementById(`btn-opt-${idx}`);
-                            if (btn) btn.onclick = () => submitAnswer(idx, true); // true = lưu vào server
+                            if (btn) btn.onclick = () => submitAnswer(idx, true);
                         });
                     }
                 });
@@ -4799,19 +4881,41 @@
         async eventSchedule() {
             const now = Date.now();
             const nextEventTime = taskTracker.getNextTime(accountId, 'event');
+            
+            // Logic tính thời gian chờ mặc định
+            // Nếu chưa có lịch hoặc tính ra số âm (quá khứ) thì đợi 1s rồi check lại, ngược lại đợi đúng thời gian
+            let waitTime = 1000; 
+
             if (nextEventTime && now >= nextEventTime) {
-                console.log("[Auto] Đã đến giờ sự kiện. Đang thực hiện...");
+                console.log("[Auto] ⏰ Đã đến giờ sự kiện. Đang thực hiện...");
                 try {
+                    // Thực hiện nhiệm vụ
                     await doDuaTopTongMon();
+                    
+                    // QUAN TRỌNG: Hàm doDuaTopTongMon phải có lệnh cập nhật lại nextEventTime (taskTracker.adjustTaskTime)
+                    // Nếu không cập nhật thời gian, nó sẽ lặp vô tận liên tục gây treo trình duyệt.
                 } catch (error) {
-                    console.error("[Auto] Lỗi khi thực hiện sự kiện:", error);
+                    console.error("[Auto] ❌ Lỗi khi thực hiện sự kiện:", error);
                 }
+                
+                // Sau khi chạy xong (dù lỗi hay không), đợi 5 giây rồi check lại lịch mới
+                waitTime = 5000; 
             } else {
-                const timeToNextEvent = nextEventTime ? nextEventTime - now : 5*60*1000;
-                setTimeout(() => {
-                    this.eventSchedule();
-                }, timeToNextEvent + this.delay);
+                // Chưa đến giờ, tính thời gian chờ
+                if (nextEventTime) {
+                    waitTime = nextEventTime - now;
+                    // Đảm bảo không chờ số âm (nếu máy tính bị lag)
+                    if (waitTime < 0) waitTime = 1000; 
+                } else {
+                    // Nếu không tìm thấy lịch (null), mặc định check lại sau 5 phút
+                    waitTime = 5 * 60 * 1000; 
+                }
+
             }
+            // Gọi đệ quy để duy trì vòng lặp vĩnh viễn
+            setTimeout(() => {
+                this.eventSchedule();
+            }, waitTime + (this.delay || 0));
         }
 
         // Tự nhập mã thưởng
