@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey
-// @version       4.9.2
+// @version       4.9.3
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.gg/*
@@ -91,18 +91,6 @@
             isTienDuyen: true
         }]
     },{
-        name: 'Đua Top Tông Môn',
-        links: [{
-            text: 'Đua Top Tông Môn',
-            isDuaTopTM: true
-        }]
-    }, {
-        name: 'Event Noel',
-        links: [{
-            text: 'Event Noel',
-            url: weburl + 'event-noel-2025?t'
-        }, ]
-    }, {
         name: 'Bảng hoạt động ngày',
         links: [{
             text: 'Bảng hoạt động ngày',
