@@ -111,53 +111,6 @@
         document.head.appendChild(style);
     }
 
-    async function speak(textVN, textEN) {
-        console.log("[TTS] Bắt đầu khởi tạo speak()");
-        await new Promise(r => setTimeout(r, 300)); // đợi hệ thống load voice
-        let voices = speechSynthesis.getVoices();
-        if (!voices.length) {
-        console.log("[TTS] Chưa có voice, chờ event voiceschanged...");
-        await new Promise(res => {
-            const onChange = () => {
-            voices = speechSynthesis.getVoices();
-            if (voices.length) {
-                speechSynthesis.removeEventListener("voiceschanged", onChange);
-                res();
-            }
-            };
-            speechSynthesis.addEventListener("voiceschanged", onChange);
-        });
-        }
-
-        voices = speechSynthesis.getVoices();
-        console.log(`[TTS] Tổng số voice: ${voices.length}`);
-        voices.forEach(v => console.log(`[VOICE] ${v.name} | ${v.lang}`));
-
-        let voice = voices.find(v => /vi[-_]?VN/i.test(v.lang));
-        let lang = "vi-VN";
-        let text = textVN;
-
-        if (!voice) {
-        console.log("[TTS] Không có voice tiếng Việt, dùng tiếng Anh");
-        voice = voices.find(v => /en[-_]?US/i.test(v.lang)) || voices[0];
-        lang = "en-US";
-        text = textEN;
-        }
-
-        if (!voice) return console.error("[TTS] ❌ Không tìm thấy voice khả dụng");
-
-        const u = new SpeechSynthesisUtterance(text);
-        u.voice = voice;
-        u.lang = lang;
-        u.rate = 0.8; // tốc độ nói
-        u.onstart = () => console.log(`[TTS] ▶️ Bắt đầu đọc (${lang}): ${text}`);
-        u.onend = () => console.log("[TTS] ✅ Hoàn tất đọc");
-        u.onerror = e => console.error("[TTS] ❌ Lỗi:", e.error);
-
-        speechSynthesis.cancel();
-        speechSynthesis.speak(u);
-    }
-
     /**
      * Lấy securityToken bằng cách fetch một URL (nếu có)
      * hoặc quét HTML của trang hiện tại (nếu không có URL).
@@ -356,7 +309,7 @@
                 diemdanh: { done: false },
                 thiluyen: { done: false, nextTime: null },
                 bicanh: { done: false, nextTime: null },
-                phucloi: { done: false, nextTime: null },
+                phucloi: { done: false, nextTime: null, monthly_reward_claimed: false },
                 hoangvuc: { done: false, nextTime: null },
                 dothach: { betplaced: false, reward_claimed: false, turn: 1 },
                 luanvo: { battle_joined: false, auto_accept: false, done: false },
@@ -1291,6 +1244,47 @@
             }
         } catch (e) {
             showNotification(`Lỗi mạng khi thực hiện Phúc Lợi Đường: ${e.message}`, 'error');
+        }
+
+        //Claim bonus reward on the last 2 day of the month
+        isMonthlyRewardClaimed = taskTracker.getTaskStatus(accountId, 'phucloi', 'monthly_reward_claimed');
+        if (isMonthlyRewardClaimed) {return;}
+
+        const today = new Date();
+        const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();  // Last day of month
+        if (today.getDate() >= lastDay - 1) {
+            console.log('[HH3D Phúc Lợi Đường] 🎉 Đang nhận thưởng cuối tháng...');
+            for (let i = 1; i <= 4; i++) {
+                const payloadBonus = new URLSearchParams();
+                payloadBonus.append('action', 'claim_bonus_reward');
+                payloadBonus.append('chest_id', i);
+                payloadBonus.append('security', securityNonce);
+                try {
+                    const responseBonus = await fetch(url, {
+                        method: 'POST',
+                        headers: headers,
+                        body: payloadBonus,
+                        credentials: 'include'
+                    });
+                    const dataBonus = await responseBonus.json();
+                    if (dataBonus.success) {
+                        showNotification(dataBonus.data.message, 'success');
+                        if (i === 4) {
+                            taskTracker.updateTask(accountId, 'phucloi', 'monthly_reward_claimed', true);
+                        }
+                    } else if (dataBonus.data.message === 'Phần thưởng cho mốc này đã được nhận trước đó.') {
+                        if (i === 4) {
+                            taskTracker.updateTask(accountId, 'phucloi', 'monthly_reward_claimed', true);
+                        }
+                        continue; // skip already claimed
+                    } else {
+                        showNotification(dataBonus.data.message, 'info');
+                    }
+                } catch (e) {
+                    showNotification(`Lỗi  khi nhận thưởng cuối tháng: ${e.message}`, 'error');
+                }
+                await new Promise(resolve => setTimeout(resolve, 300));
+            }   
         }
     }
 
@@ -2500,35 +2494,6 @@
             } catch (e) { console.error(`${this.logPrefix} ❌ Lỗi mạng (tấn công user):`, e); return false; }
         }
 
-        async searchEnemiesById(userIds) {
-            const allMines = await this.getAllMines();
-            if (!allMines || !allMines.minesData || allMines.minesData.length === 0) {
-                showNotification('Không tải được danh sách mỏ khoáng mạch.', 'error');
-                return [];
-            }
-
-            const allMinesIds = allMines.minesData.map(m => m.id);
-            this.securityToken = await getSecurityToken(this.khoangMachUrl);
-            for (let mineId of allMinesIds) {
-                const mineInfo = await this.getUsersInMine(mineId);
-                if (!mineInfo || !mineInfo.users || mineInfo.users.length === 0) continue;
-                const foundUsers = mineInfo.users.filter(u => userIds.includes(u.id.toString()));
-                if (foundUsers.length > 0) {
-                    const names = foundUsers.map(u => u.name).join(', ');
-                    const mineName = allMines.minesData.find(m => m.id === mineId)?.name || 'Unknown';
-                    showNotification(`Tìm thấy ${names} trong mỏ ${mineName}`, 'info', 10000);
-                    await speak(`Tìm thấy địch trong mỏ ${mineName}`, 'Enemy founded');
-                    return foundUsers.map(u => ({
-                        ...u,
-                        mineId: mineId,
-                        mineName: allMines.minesData.find(m => m.id === mineId)?.name || 'Unknown'
-                    }))
-                }
-                await new Promise(r => setTimeout(r, 500)); // đợi 0.8s để tránh spam
-            }
-            return [];
-        }
-
         async leaveMine(mineId) {
             const nonce = await this.#getNonce(/action: 'leave_mine',[\s\S]*?security: '([a-f0-9]+)'/);
             if (!nonce) { showNotification('Lỗi nonce (leave_mine).', 'error'); return false; }
@@ -2707,6 +2672,449 @@
                 }
             }
         }
+
+        /**
+         * Lấy danh sách tổng môn
+         * @returns {Promise<Array<{id: string, name: string, level: number}>>} Mảng đối tượng tổng môn
+         * ví dụ: [{id: "123", name: "Tông Môn A", level: 6}, ...]
+         */
+        async getListTongMon() {
+            return new Promise((resolve, reject) => {
+                GM_xmlhttpRequest({
+                    method: "GET",
+                    url: weburl + "danh-sach-cac-tong-mon-tai-hoathinh3d",
+                    onload: function(response) {
+                        if (response.status !== 200) {
+                            reject(`Lỗi kết nối: ${response.status}`);
+                            return;
+                        }
+
+                        try {
+                            const parser = new DOMParser();
+                            const doc = parser.parseFromString(response.responseText, "text/html");
+                            const rows = doc.querySelectorAll('table.bxh-page tbody tr');
+                            const results = [];
+
+                            rows.forEach(row => {
+                                // 1. Lấy ID
+                                const btn = row.querySelector('button.join-group');
+                                const id = btn ? btn.getAttribute('data-group-id') : null;
+
+                                // 2. Xử lý Tên và Level
+                                const nameDiv = row.querySelector('.display-container.group-name');
+                                
+                                if (nameDiv && id) {
+                                    let levelNum = 0;
+
+                                    // --- Lấy số Level ---
+                                    const levelSpan = nameDiv.querySelector('.group-level');
+                                    if (levelSpan) {
+                                        // Regex tìm chuỗi số trong text (ví dụ "《Cấp 6》" -> lấy 6)
+                                        const match = levelSpan.textContent.match(/\d+/);
+                                        if (match) {
+                                            levelNum = parseInt(match[0], 10);
+                                        }
+                                    }
+
+                                    // --- Lấy Tên ---
+                                    // Clone div để thao tác xóa span mà không ảnh hưởng logic khác
+                                    const tempDiv = nameDiv.cloneNode(true);
+                                    const spanInClone = tempDiv.querySelector('.group-level');
+                                    if (spanInClone) {
+                                        spanInClone.remove(); // Xóa phần hiển thị cấp
+                                    }
+                                    const name = tempDiv.textContent.trim();
+
+                                    // Đẩy vào mảng kết quả
+                                    results.push({ 
+                                        id: id, 
+                                        name: name,
+                                        level: levelNum // Trả về số nguyên (int)
+                                    });
+                                }
+                            });
+
+                            resolve(results);
+
+                        } catch (e) {
+                            reject(`Lỗi parse dữ liệu: ${e.message}`);
+                        }
+                    },
+                    onerror: function(err) {
+                        reject(err);
+                    }
+                });
+            });
+        }
+
+
+        parseGroupRoleHtml(groupRoleHtml) {
+            if (!groupRoleHtml || typeof groupRoleHtml !== 'string') {
+                return { tongMonName: null, role: null };
+            }
+
+            try {
+                const doc = new DOMParser().parseFromString(
+                    `<div>${groupRoleHtml}</div>`,
+                    'text/html'
+                );
+                const root = doc.body;
+
+                /* =========
+                * ROLE: tooltip cuối
+                * ========= */
+                const tooltips = Array.from(
+                    root.querySelectorAll('span[data-tooltip]')
+                )
+                    .map(el => el.getAttribute('data-tooltip')?.trim())
+                    .filter(Boolean);
+
+                const role = tooltips.length
+                    ? tooltips[tooltips.length - 1]
+                    : null;
+
+                /* =========
+                * TÊN TÔNG
+                * ========= */
+                let tongMonName = null;
+
+                const bangHoiEl = root.querySelector('span[class*="bang-hoi-mau"]');
+                if (bangHoiEl) {
+                    const t = (bangHoiEl.textContent || '').trim();
+                    if (t) tongMonName = t;
+                }
+
+                if (!tongMonName) {
+                    const wrapper = root.querySelector('.tong-cap-wrapper');
+                    if (wrapper) {
+                        const next = wrapper.nextElementSibling;
+                        if (next && next.tagName === 'SPAN') {
+                            const t = (next.textContent || '').trim();
+                            if (t) tongMonName = t;
+                        }
+                    }
+                }
+
+                return { tongMonName, role };
+            } catch {
+                return { tongMonName: null, role: null };
+            }
+        }
+
+
+        /**
+         * Tìm kiếm kẻ địch theo ID và/hoặc theo Tông Môn (ID tông).
+         * @param {string[]} enemyList - danh sách userId (string)
+         * @param {string[]} tongMonList - danh sách groupId tông môn (string)
+         * @returns {Promise<Array>}
+         */
+        async searchEnemiesInMines(enemyList, tongMonList) {
+            const enemySet = new Set((enemyList || []).map(x => String(x).trim()).filter(Boolean));
+            const tongIdSet = new Set((tongMonList || []).map(x => String(x).trim()).filter(Boolean));
+
+            if (enemySet.size === 0 && tongIdSet.size === 0) {
+                showNotification('Vui lòng nhập ID kẻ địch hoặc chọn Tông Môn để tìm.', 'warn');
+                return [];
+            }
+
+            // Map ID tông -> tên tông (vì group_role_html chỉ có tên)
+            let tongNameSet = new Set();
+            if (tongIdSet.size > 0) {
+                try {
+                    const allTong = await this.getListTongMon(); // [{id,name,level}, ...]
+                    tongNameSet = new Set(
+                        (allTong || [])
+                            .filter(t => tongIdSet.has(String(t.id)))
+                            .map(t => String(t.name || '').trim())
+                            .filter(Boolean)
+                    );
+                } catch (e) {
+                    console.warn('[Khoáng Mạch] Không tải được list tông môn để map ID->Tên:', e);
+                }
+            }
+
+            const allMines = await this.getAllMines();
+            if (!allMines || !allMines.minesData || allMines.minesData.length === 0) {
+                showNotification('Không tải được danh sách mỏ khoáng mạch.', 'error');
+                return [];
+            }
+
+            // ✅ CHỈ TÌM TRONG MỎ GOLD + SILVER
+            const allowedTypes = new Set(['gold', 'silver']);
+            const filteredMines = allMines.minesData.filter(m => allowedTypes.has(String(m.type)));
+            const allMinesIds = filteredMines.map(m => m.id);
+
+            // map nhanh mineId -> mineName
+            const mineNameById = new Map(filteredMines.map(m => [String(m.id), m.name]));
+
+            this.securityToken = await getSecurityToken(this.khoangMachUrl);
+
+            const results = [];
+
+            for (let mineId of allMinesIds) {
+                const mineInfo = await this.getUsersInMine(mineId);
+                if (!mineInfo || !mineInfo.users || mineInfo.users.length === 0) continue;
+
+                const mineName = mineNameById.get(String(mineId)) || 'Unknown';
+
+                for (const u of mineInfo.users) {
+                    const uid = String(u.id ?? '').trim();
+                    const extra = this.parseGroupRoleHtml(u.group_role_html);
+                    const userTongName = String(extra.tongMonName || '').trim();
+
+                    const matchById = enemySet.size > 0 && enemySet.has(uid);
+                    const matchByTong =
+                        tongNameSet.size > 0 &&
+                        userTongName &&
+                        tongNameSet.has(userTongName);
+
+                    if (matchById || matchByTong) {
+                        results.push({
+                            ...u,
+                            mineId,
+                            mineName,
+                            tongMonName: extra.tongMonName,
+                            role: extra.role
+                        });
+                    }
+                }
+
+                await new Promise(r => setTimeout(r, 300));
+            }
+
+            this.showEnemySearchResults(results);
+            sessionStorage.setItem('khoangmach_enemy_search_results', JSON.stringify(results));
+            return results;
+        }
+
+        /**
+         * Hộp thoại thông báo tìm kiếm
+         * @param {Array} foundUsers Mảng đối tượng người chơi tìm thấy
+         * Ví dụ: [{id: "123", name: "Người Chơi A", mineId: "1", mineName: "Mỏ A", tongMonName: "Tông Môn A", roleInTong: "Trưởng Lão"}, ...]
+         */
+        showEnemySearchResults(foundUsers) {
+            // ✅ Không dùng Swal nữa
+            if (!Array.isArray(foundUsers) || foundUsers.length === 0) {
+                showNotification('Không tìm thấy kẻ địch trong các mỏ khoáng mạch.', 'info');
+                return;
+            }
+
+            const PANEL_ID = 'enemyDashboard';
+            const RESTORE_ID = 'enemyDashboardRestore';
+
+            // cleanup cũ
+            const oldPanel = document.getElementById(PANEL_ID);
+            if (oldPanel) oldPanel.remove();
+            const oldRestore = document.getElementById(RESTORE_ID);
+            if (oldRestore) oldRestore.remove();
+
+            // escape để tránh inject HTML ngoài ý muốn
+            const esc = (v) =>
+                String(v ?? '')
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#39;');
+
+            // group theo mineId + sort theo số lượng địch (desc)
+            const mines = Object.values(
+                foundUsers.reduce((acc, u) => {
+                    const mineId = String(u.mineId ?? 'unknown');
+                    if (!acc[mineId]) {
+                        acc[mineId] = {
+                            mineId,
+                            mineName: u.mineName ?? 'Unknown',
+                            users: [],
+                            tongMons: new Set()
+                        };
+                    }
+                    acc[mineId].users.push(u);
+                    if (u.tongMonName) acc[mineId].tongMons.add(String(u.tongMonName).trim());
+                    return acc;
+                }, {})
+            ).sort((a, b) => (b.users?.length ?? 0) - (a.users?.length ?? 0));
+
+            // panel
+            const panel = document.createElement('div');
+            panel.id = PANEL_ID;
+            panel.className = 'enemy-dashboard';
+            panel.style.cssText = `
+                position: fixed;
+                right: 20px;
+                bottom: 20px;
+                width: 420px;
+                max-width: calc(100vw - 40px);
+                background: #1f1f1f;
+                color: #fff;
+                border: 1px solid rgba(255,255,255,.12);
+                border-radius: 10px;
+                box-shadow: 0 12px 30px rgba(0,0,0,.45);
+                z-index: 2147483647;
+                font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+                overflow: hidden;
+            `;
+
+            panel.innerHTML = `
+                <div class="ed-header" style="
+                    display:flex; align-items:center; justify-content:space-between;
+                    padding:10px 12px;
+                    background: rgba(255,255,255,.06);
+                    border-bottom: 1px solid rgba(255,255,255,.10);
+                ">
+                    <div style="font-weight:700;">
+                        📊 Phát hiện ${foundUsers.length} kẻ địch
+                    </div>
+                    <div class="ed-actions" style="display:flex; gap:8px;">
+                        <button type="button" id="edMin" aria-label="Thu gọn" style="
+                            width: 32px; height: 28px;
+                            border: 0; border-radius: 6px;
+                            background: rgba(255,255,255,.10);
+                            color: #ddd; cursor: pointer;
+                            font-size: 18px; line-height: 1;
+                        ">—</button>
+                        <button type="button" id="edClose" aria-label="Đóng" style="
+                            width: 32px; height: 28px;
+                            border: 0; border-radius: 6px;
+                            background: rgba(255,255,255,.10);
+                            color: #ddd; cursor: pointer;
+                            font-size: 18px; line-height: 1;
+                        ">✕</button>
+                    </div>
+                </div>
+
+                <div class="ed-body" style="
+                    max-height: 400px;
+                    overflow-y: auto;
+                    padding: 10px 12px;
+                ">
+                    ${
+                        mines
+                            .map((mine, idx) => {
+                                const tongMonsText =
+                                    mine.tongMons && mine.tongMons.size
+                                        ? esc([...mine.tongMons].join(', '))
+                                        : 'Không rõ';
+
+                                return `
+                                    <div style="
+                                        border: 1px solid rgba(255,255,255,.12);
+                                        border-radius: 10px;
+                                        margin-bottom: 10px;
+                                        overflow: hidden;
+                                        background: rgba(255,255,255,.04);
+                                    ">
+                                        <div class="mine-header" data-target="mine-${idx}" style="
+                                            cursor: pointer;
+                                            padding: 10px 10px;
+                                            background: rgba(255,255,255,.06);
+                                            display:flex;
+                                            justify-content:space-between;
+                                            align-items:center;
+                                            gap:10px;
+                                        ">
+                                            <div>
+                                                <div style="font-weight:700;">⛏ ${esc(mine.mineName)}</div>
+                                                <div style="font-weight:400; font-size:12px; opacity:.85;">
+                                                    • ${mine.users.length} kẻ địch • Tông môn: ${tongMonsText}
+                                                </div>
+                                            </div>
+                                            <span class="arrow" style="opacity:.85;">▼</span>
+                                        </div>
+
+                                        <div id="mine-${idx}" class="mine-content" style="display:none; padding:10px;">
+                                            ${
+                                                (mine.users || [])
+                                                    .map(
+                                                        (u) => `
+                                                        <div style="
+                                                            padding: 8px 0;
+                                                            border-bottom: 1px dashed rgba(255,255,255,.18);
+                                                        ">
+                                                            <div style="font-weight:700;">${esc(u.name)}</div>
+                                                            <div style="font-size:12px; opacity:.9;">
+                                                                Tông môn: ${esc(u.tongMonName || 'Chưa rõ')}<br>
+                                                                Chức vụ: ${esc(u.role || 'Chưa rõ')}
+                                                            </div>
+                                                        </div>
+                                                    `
+                                                    )
+                                                    .join('')
+                                            }
+                                        </div>
+                                    </div>
+                                `;
+                            })
+                            .join('')
+                    }
+                </div>
+            `;
+
+            document.body.appendChild(panel);
+
+            // nút restore nổi khi thu gọn
+            const restoreBtn = document.createElement('button');
+            restoreBtn.id = RESTORE_ID;
+            restoreBtn.textContent = '📊 Mở dashboard';
+            restoreBtn.style.cssText = `
+                display:none;
+                position:fixed;
+                bottom:20px;
+                right:20px;
+                z-index:2147483647;
+                padding:6px 10px;
+                font-size:12px;
+                border-radius:8px;
+                border:1px solid rgba(0,0,0,.25);
+                background:#fff;
+                color:#111;
+                cursor:pointer;
+                pointer-events:auto;
+                box-shadow: 0 8px 20px rgba(0,0,0,.25);
+            `;
+            document.body.appendChild(restoreBtn);
+
+            const body = panel.querySelector('.ed-body');
+            const btnMin = panel.querySelector('#edMin');
+            const btnClose = panel.querySelector('#edClose');
+
+            const collapse = () => {
+                panel.style.display = 'none';
+                restoreBtn.style.display = 'block';
+            };
+
+            const restore = () => {
+                panel.style.display = 'block';
+                restoreBtn.style.display = 'none';
+            };
+
+            btnMin.onclick = collapse;
+            restoreBtn.onclick = restore;
+
+            btnClose.onclick = () => {
+                panel.remove();
+                restoreBtn.remove();
+            };
+
+            // collapse/expand từng mỏ
+            panel.querySelectorAll('.mine-header').forEach((header) => {
+                header.addEventListener('click', () => {
+                    const targetId = header.getAttribute('data-target');
+                    const content = panel.querySelector('#' + targetId);
+                    const arrow = header.querySelector('.arrow');
+                    if (!content) return;
+
+                    const open = content.style.display === 'block';
+                    content.style.display = open ? 'none' : 'block';
+                    if (arrow) arrow.textContent = open ? '▼' : '▲';
+                });
+            });
+
+            // (tuỳ chọn) auto mở mỏ có nhiều địch nhất
+            const firstHeader = panel.querySelector('.mine-header');
+            if (firstHeader) firstHeader.click();
+        }
+
     }
 
     //===================================
@@ -4123,14 +4531,14 @@
             khoangMachSettingsButton.classList.add('custom-script-hoang-vuc-settings-btn');
             khoangMachSettingsButton.textContent = '⚙️';
 
-            const khoangMachSearchButton = document.createElement('button');
-            khoangMachSearchButton.classList.add('custom-script-hoang-vuc-settings-btn');
-            khoangMachSearchButton.textContent = '🔍';
-            khoangMachSearchButton.title = 'Tìm kẻ địch theo ID';
+            const khoangMachSearchConfigButton = document.createElement('button');
+            khoangMachSearchConfigButton.classList.add('custom-script-hoang-vuc-settings-btn');
+            khoangMachSearchConfigButton.textContent = '🔍';
+            khoangMachSearchConfigButton.title = 'Cấu hình ìm kẻ địch';
 
             buttonRow.appendChild(khoangMachSettingsButton);
             buttonRow.appendChild(khoangMachButton);
-            buttonRow.appendChild(khoangMachSearchButton);
+            buttonRow.appendChild(khoangMachSearchConfigButton);
 
             const configDiv = document.createElement('div');
             configDiv.style.display = 'none';
@@ -4187,19 +4595,55 @@
                 <label for="checkInterval" align="left" title="Khoảng thời gian (phút) để kiểm tra và thực hiện các hành động liên quan đến Khoáng Mạch.">Thời gian kiểm tra khoáng (phút)</label>
                 <input type="number" id="checkInterval" value="5" style="width: 50px;">
             </div>
-            <div class="custom-script-khoang-mach-config-group">
-                <label for="enemySearch" title="Tự động tìm kẻ địch">Nhập id kẻ địch để tìm:</label>
-                <input type="text" id="enemySearch" placeholder="Nhập id kẻ địch, ví dụ: 12345;23456;32456" style="width: 100%;">
-            </div>
-            <div class="custom-script-khoang-mach-config-group number-input-group">
-                <label for="enemySearchInterval" title="Thời gian tự động tìm kẻ địch">Tự động tìm kẻ địch mỗi (phút)</label>
-                <input type="number" id="enemySearchInterval" value="5" style="width: 50px;">
-            </div>
             `;
 
             container.appendChild(buttonRow);
             container.appendChild(configDiv);
             parentGroup.appendChild(container);
+
+            const searchConfigContainer = document.createElement('div');
+            searchConfigContainer.style.display = 'none';
+            searchConfigContainer.classList.add('custom-script-khoang-mach-container');
+            const searchEnemiesInput = document.createElement('input');
+            searchEnemiesInput.type = 'text';
+            searchEnemiesInput.placeholder = 'Nhập ID kẻ địch, ví dụ: 12345;67890;65454';
+            searchEnemiesInput.style.width = '100%';
+            searchConfigContainer.appendChild(searchEnemiesInput);
+            const searchTongMonRow = document.createElement('div');
+            searchTongMonRow.classList.add('custom-script-khoang-mach-button-row');
+            const searchTongMonInput = document.createElement('input');
+            searchTongMonInput.type = 'text';
+            searchTongMonInput.placeholder = 'Nhập id Tông Môn, ví dụ: 57264;57265';
+            searchTongMonInput.style.width = '100%';
+            const searchTongMonViewButton = document.createElement('button');
+            searchTongMonViewButton.textContent = '👁';
+            searchTongMonViewButton.classList.add('custom-script-khoang-mach-button');
+            searchTongMonRow.appendChild(searchTongMonInput);
+            searchTongMonRow.appendChild(searchTongMonViewButton);
+            searchConfigContainer.appendChild(searchTongMonRow);
+            container.appendChild(searchConfigContainer);
+
+            const searchButtonRow = document.createElement('div');
+            searchButtonRow.classList.add('custom-script-khoang-mach-button-row');
+            searchConfigContainer.appendChild(searchButtonRow);
+
+            const searchButton = document.createElement('button');
+            searchButton.classList.add('custom-script-khoang-mach-button');
+            searchButton.textContent = 'Bắt đầu tìm kiếm';
+            searchButton.title = 'Bắt đầu tìm kiếm kẻ địch trong khoáng mạch';
+            searchButtonRow.appendChild(searchButton);
+            const tongMonContainer = document.createElement('div');
+            searchConfigContainer.appendChild(tongMonContainer);
+            const viewResultsButton = document.createElement('button');
+            viewResultsButton.classList.add('custom-script-khoang-mach-button');
+            viewResultsButton.textContent = 'Xem kết quả';
+            viewResultsButton.title = 'Xem kết quả tìm kiếm kẻ địch';
+            searchButtonRow.appendChild(viewResultsButton);
+            const searchResultSaved = sessionStorage.getItem(`khoangmach_enemy_search_results`);
+            let searchResults = searchResultSaved ? JSON.parse(searchResultSaved) : [];
+            if (searchResults.length === 0) {
+                viewResultsButton.disabled = true;
+            }
 
             const specificMineSelect = configDiv.querySelector('#specificMineSelect');
             const rewardModeSelect = configDiv.querySelector('#rewardModeSelect');
@@ -4211,10 +4655,6 @@
             const outerNotificationCheckbox = configDiv.querySelector('#outerNotification');
             const fastAttackCheckbox = configDiv.querySelector('#fastAttack');
             const checkIntervalInput = configDiv.querySelector('#checkInterval');
-            const enemySearchInput = configDiv.querySelector('#enemySearch');
-            const enemySearchIntervalInput = configDiv.querySelector('#enemySearchInterval');
-
-
 
             const keyMine = `khoangmach_selected_mine_${accountId}`;
             const savedMineSetting = localStorage.getItem(keyMine);
@@ -4235,9 +4675,7 @@
             leaveMineToClaimRewardCheckbox.checked = localStorage.getItem(`khoangmach_leave_mine_to_claim_reward_${accountId}`) == 'true';
             autoBuffCheckbox.checked = localStorage.getItem('khoangmach_use_buff') === 'true';
             fastAttackCheckbox.checked = localStorage.getItem('khoangmach_fast_attack') === 'true';
-            enemySearchInput.value = localStorage.getItem(`khoangmach_enemy_search_${accountId}`) || '';
             outerNotificationCheckbox.checked = localStorage.getItem('khoangmach_outer_notification') === 'true';
-            enemySearchIntervalInput.value = localStorage.getItem('khoangmach_enemy_search_interval') || '5';
 
             outerNotificationCheckbox.addEventListener('change', (e) => {
                 localStorage.setItem('khoangmach_outer_notification', e.target.checked);
@@ -4329,24 +4767,7 @@
                 localStorage.setItem('khoangmach_check_interval', value.toString());
             });
 
-            enemySearchInput.addEventListener('change', (e) => {
-                const value = e.target.value.trim();
-                localStorage.setItem(`khoangmach_enemy_search_${accountId}`, value);
-            }
-            );
-
-            enemySearchIntervalInput.addEventListener('change', (e) => {
-                let value = parseInt(e.target.value, 10);
-                if (isNaN(value) || value < 1) {
-                    value = 1;
-                    e.target.value = '1';
-                } else if (value > 30) {
-                    value = 30;
-                    e.target.value = '30';
-                }
-                localStorage.setItem('khoangmach_enemy_search_interval', value.toString());
-            });
-
+            // Xử lý sự kiện khoáng mạch
             khoangMachButton.addEventListener('click', async () => {
                 khoangMachButton.disabled = true;
                 khoangMachButton.textContent = 'Đang xử lý...';
@@ -4360,62 +4781,191 @@
             });
 
             // Xử lý sự kiện tìm kẻ địch
-            khoangMachSearchButton.addEventListener('click', async () => {
-
-                const enemyIds = enemySearchInput.value.split(';').map(id => id.trim()).filter(id => id);
-                if (enemyIds.length === 0) {
-                    showNotification('Vui lòng nhập ít nhất một ID kẻ địch để tìm.', 'error');
+            khoangMachSearchConfigButton.addEventListener('click', async () => {
+                if (searchConfigContainer.style.display === 'block') {
+                    searchConfigContainer.style.display = 'none';
                     return;
                 }
-
-                // Kiểm tra trạng thái hiện tại của nút
-                const isSearching = khoangMachSearchButton.dataset.searching === 'true';
-
-                if (isSearching) {
-                    // Đang tìm -> Dừng tìm
-                    if (window.enemySearchInterval) {
-                        clearInterval(window.enemySearchInterval);
-                        window.enemySearchInterval = null;
-                    }
-                    if (window.iconToggleInterval) {
-                        clearInterval(window.iconToggleInterval);
-                        window.iconToggleInterval = null;
-                    }
-                    khoangMachSearchButton.dataset.searching = 'false';
-                    khoangMachSearchButton.disabled = false;
-                    khoangMachSearchButton.textContent = '🔍';
-                    khoangMachSearchButton.title = 'Tìm kẻ địch theo ID';
-                    showNotification('Đã dừng tìm kẻ địch tự động', 'info');
-                } else {
-                    // Chưa tìm -> Bắt đầu tìm
-                    khoangMachSearchButton.dataset.searching = 'true';
-                    khoangMachSearchButton.title = 'Dừng tìm kẻ địch';
-
-                    // Tạo hiệu ứng chuyển đổi icon - NHẸ HơN với 1 giây
-                    let isFirstIcon = true;
-                    window.iconToggleInterval = setInterval(() => {
-                        khoangMachSearchButton.textContent = isFirstIcon ? '🔎' : '🔍';
-                        isFirstIcon = !isFirstIcon;
-                    }, 1000); // 1 giây thay vì 0.5 giây → nhẹ hơn nữa
-
-                    // Tìm ngay lần đầu
-                    try {
-                        await khoangmach.searchEnemiesById(enemyIds);
-                    } catch (err) {
-                        console.error('[Khoáng Mạch] Lỗi khi tìm kẻ địch:', err);
-                    }
-
-                    // Thiết lập interval để tìm định kỳ
-                    const intervalMinutes = parseInt(enemySearchIntervalInput.value, 10) || 5;
-                    window.enemySearchInterval = setInterval(async () => {
-                        try {
-                            await khoangmach.searchEnemiesById(enemyIds);
-                        } catch (err) {
-                            console.error('[Khoáng Mạch] Lỗi khi tìm kẻ địch tự động:', err);
-                        }
-                    }, intervalMinutes * 60 * 1000);
-                }
+                searchConfigContainer.style.display = 'block';
             });
+
+            searchEnemiesInput.addEventListener('input', () => {
+                localStorage.setItem(`khoangmach_search_enemies_${accountId}`, searchEnemiesInput.value);
+            });
+
+            
+            // ===== Đồng bộ danh sách Tông Môn (checkbox) <-> searchTongMonInput (gói vào 1 hàm) =====
+            const setupTongMonSelectionSync = ({
+                accountId,
+                searchTongMonInput,
+                tongMonContainer,
+                viewButton,
+                fetchTongMonList,
+                notify
+            }) => {
+                const tongMonSelectionKey = `khoangmach_search_tongmon_${accountId}`;
+
+                /**
+                 * Parse chuỗi id dạng "1;2; 3" -> { list: string[], set: Set<string> }
+                 */
+                const parseIds = (raw) => {
+                    const list = (raw || '')
+                        .split(';')
+                        .map(s => (s || '').trim())
+                        .filter(Boolean);
+
+                    const set = new Set();
+                    const orderedUnique = [];
+                    for (const id of list) {
+                        if (!set.has(id)) {
+                            set.add(id);
+                            orderedUnique.push(id);
+                        }
+                    }
+                    return { list: orderedUnique, set };
+                };
+
+                const normalizeValue = (ids) => (ids || []).join(';');
+
+                let checkboxById = new Map();
+                let isSyncing = false;
+                let loadedOnce = false;
+
+                // Load value từ localStorage vào input ngay khi khởi tạo
+                const saved = localStorage.getItem(tongMonSelectionKey) || '';
+                if (saved && !searchTongMonInput.value) {
+                    searchTongMonInput.value = saved;
+                }
+
+                const syncInputValue = (nextValue) => {
+                    if (searchTongMonInput.value === nextValue) return;
+                    isSyncing = true;
+                    try {
+                        searchTongMonInput.value = nextValue;
+                        localStorage.setItem(tongMonSelectionKey, nextValue);
+                    } finally {
+                        isSyncing = false;
+                    }
+                };
+
+                const syncCheckboxesFromInput = () => {
+                    if (!checkboxById || checkboxById.size === 0) return;
+                    const { set } = parseIds(searchTongMonInput.value);
+                    for (const [id, checkbox] of checkboxById.entries()) {
+                        checkbox.checked = set.has(id);
+                    }
+                };
+
+                const renderList = (tongMonList) => {
+                    tongMonContainer.innerHTML = '';
+                    checkboxById = new Map();
+
+                    tongMonContainer.style.maxHeight = '240px';
+                    tongMonContainer.style.overflowY = 'auto';
+
+                    const current = parseIds(searchTongMonInput.value);
+                    const currentSet = new Set(current.list);
+                    //sort theo cấp giảm dần
+                    tongMonList.sort((a, b) => b.level - a.level);
+                    for (const tm of (tongMonList || [])) {
+                        const row = document.createElement('div');
+                        row.classList.add('custom-script-khoang-mach-button-row');
+                        row.style.alignItems = 'center';
+
+                        const checkbox = document.createElement('input');
+                        checkbox.type = 'checkbox';
+                        checkbox.style.marginRight = '8px';
+                        checkbox.checked = currentSet.has(tm.id);
+                        checkboxById.set(tm.id, checkbox);
+                        //Màu khác nhau cho các cấp khác nhau
+                        const label = document.createElement('span');
+                        for (let i = 1; i <= 10; i++) {
+                            if (tm.level === i) {
+                                label.style.color = `hsl(${(i - 1) * 36}, 100%, 50%)`;
+                                break;
+                            }
+                        }
+                        label.textContent = `[Cấp ${tm.level}] ${tm.name}`;
+
+                        checkbox.addEventListener('change', () => {
+                            const { list } = parseIds(searchTongMonInput.value);
+                            const set = new Set(list);
+
+                            if (checkbox.checked) {
+                                if (!set.has(tm.id)) list.push(tm.id);
+                            } else {
+                                const idx = list.indexOf(tm.id);
+                                if (idx !== -1) list.splice(idx, 1);
+                            }
+
+                            syncInputValue(normalizeValue(list));
+                        });
+
+                        row.appendChild(checkbox);
+                        row.appendChild(label);
+                        tongMonContainer.appendChild(row);
+                    }
+
+                    // đảm bảo checkbox phản ánh đúng input
+                    syncCheckboxesFromInput();
+                };
+
+                // Input -> Checkbox
+                searchTongMonInput.addEventListener('input', () => {
+                    localStorage.setItem(tongMonSelectionKey, searchTongMonInput.value);
+                    if (!isSyncing) syncCheckboxesFromInput();
+                });
+
+                // Button 👁 -> load + render (toggle hiển thị cho tiện)
+                viewButton.addEventListener('click', async () => {
+                    // toggle nếu đã load trước đó
+                    if (loadedOnce && tongMonContainer.innerHTML && tongMonContainer.style.display !== 'none') {
+                        tongMonContainer.style.display = 'none';
+                        return;
+                    }
+                    tongMonContainer.style.display = 'block';
+
+                    tongMonContainer.innerHTML = 'Đang tải danh sách tông môn...';
+                    try {
+                        const list = await fetchTongMonList();
+                        renderList(list);
+                        loadedOnce = true;
+                    } catch (e) {
+                        tongMonContainer.innerHTML = '';
+                        notify(`Không tải được danh sách tông môn: ${e}`, 'error');
+                    }
+                });
+            };
+
+            setupTongMonSelectionSync({
+                accountId,
+                searchTongMonInput,
+                tongMonContainer,
+                viewButton: searchTongMonViewButton,
+                fetchTongMonList: () => khoangmach.getListTongMon(),
+                notify: showNotification
+            });
+
+            searchButton.addEventListener('click', async () => {
+                searchButton.disabled = true;
+                searchButton.textContent = 'Đang tìm kiếm...';
+                const rawEnemyIds = searchEnemiesInput.value;
+                const enemyList = rawEnemyIds.split(';').map(id => id.trim()).filter(id => id); 
+                const rawTongMonIds = searchTongMonInput.value;
+                const tongMonList = rawTongMonIds.split(';').map(id => id.trim()).filter(id => id);
+                await khoangmach.searchEnemiesInMines(enemyList, tongMonList);
+                searchButton.textContent = 'Bắt đầu tìm kiếm';
+                searchButton.disabled = false;
+            });
+
+            viewResultsButton.addEventListener('click', () => {
+                const searchResultSaved = sessionStorage.getItem(`khoangmach_enemy_search_results`);
+                const searchResults = searchResultSaved ? JSON.parse(searchResultSaved) : [];
+                khoangmach.showEnemySearchResults(searchResults);
+            });
+
+            this.updateButtonState('khoangmach');
+
         }
 
         async createTienDuyenMenu(parentGroup) {
