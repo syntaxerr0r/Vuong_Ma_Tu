@@ -7,7 +7,7 @@
 // @match         https://hoathinh3d.gg/*
 // @require       https://cdn.jsdelivr.net/npm/sweetalert2@11.26.12/dist/sweetalert2.all.min.js
 // @run-at        document-start
-// @grant         GM.xmlhttpRequest
+// @grant         GM.xmlHttpRequest
 // @connect       raw.githubusercontent.com
 // ==/UserScript==
 (async function() {
@@ -2680,7 +2680,7 @@
          */
         async getListTongMon() {
             return new Promise((resolve, reject) => {
-                GM.xmlhttpRequest({
+                GM.xmlHttpRequest({
                     method: "GET",
                     url: weburl + "danh-sach-cac-tong-mon-tai-hoathinh3d",
                     onload: function(response) {
