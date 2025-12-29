@@ -1,13 +1,13 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey
-// @version       5.0.1
+// @version       5.0.2
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.gg/*
 // @require       https://cdn.jsdelivr.net/npm/sweetalert2@11.26.12/dist/sweetalert2.all.min.js
 // @run-at        document-start
-// @grant         GM.xmlHttpRequest
+// @grant         GM_xmlhttpRequest
 // @connect       raw.githubusercontent.com
 // ==/UserScript==
 (async function() {
@@ -2678,74 +2678,74 @@
          * @returns {Promise<Array<{id: string, name: string, level: number}>>} Mảng đối tượng tổng môn
          * ví dụ: [{id: "123", name: "Tông Môn A", level: 6}, ...]
          */
-        async getListTongMon() {
-            return new Promise((resolve, reject) => {
-                GM.xmlHttpRequest({
-                    method: "GET",
-                    url: weburl + "danh-sach-cac-tong-mon-tai-hoathinh3d",
-                    onload: function(response) {
-                        if (response.status !== 200) {
-                            reject(`Lỗi kết nối: ${response.status}`);
-                            return;
-                        }
+ async getListTongMon() {
+    try {
+        // 1. SỬA LỖI LOGIC URL: 
+        // Dùng đường dẫn tương đối "/" để tự động lấy domain hiện tại.
+        // Không cần biến "weburl" (tránh lỗi weburl is not defined).
+        const response = await fetch("/danh-sach-cac-tong-mon-tai-hoathinh3d");
 
-                        try {
-                            const parser = new DOMParser();
-                            const doc = parser.parseFromString(response.responseText, "text/html");
-                            const rows = doc.querySelectorAll('table.bxh-page tbody tr');
-                            const results = [];
-
-                            rows.forEach(row => {
-                                // 1. Lấy ID
-                                const btn = row.querySelector('button.join-group');
-                                const id = btn ? btn.getAttribute('data-group-id') : null;
-
-                                // 2. Xử lý Tên và Level
-                                const nameDiv = row.querySelector('.display-container.group-name');
-                                
-                                if (nameDiv && id) {
-                                    let levelNum = 0;
-
-                                    // --- Lấy số Level ---
-                                    const levelSpan = nameDiv.querySelector('.group-level');
-                                    if (levelSpan) {
-                                        // Regex tìm chuỗi số trong text (ví dụ "《Cấp 6》" -> lấy 6)
-                                        const match = levelSpan.textContent.match(/\d+/);
-                                        if (match) {
-                                            levelNum = parseInt(match[0], 10);
-                                        }
-                                    }
-
-                                    // --- Lấy Tên ---
-                                    // Clone div để thao tác xóa span mà không ảnh hưởng logic khác
-                                    const tempDiv = nameDiv.cloneNode(true);
-                                    const spanInClone = tempDiv.querySelector('.group-level');
-                                    if (spanInClone) {
-                                        spanInClone.remove(); // Xóa phần hiển thị cấp
-                                    }
-                                    const name = tempDiv.textContent.trim();
-
-                                    // Đẩy vào mảng kết quả
-                                    results.push({ 
-                                        id: id, 
-                                        name: name,
-                                        level: levelNum // Trả về số nguyên (int)
-                                    });
-                                }
-                            });
-
-                            resolve(results);
-
-                        } catch (e) {
-                            reject(`Lỗi parse dữ liệu: ${e.message}`);
-                        }
-                    },
-                    onerror: function(err) {
-                        reject(err);
-                    }
-                });
-            });
+        // Kiểm tra trạng thái HTTP
+        if (!response.ok) {
+            throw new Error(`Lỗi kết nối: ${response.status} ${response.statusText}`);
         }
+
+        // 2. Chuyển đổi dữ liệu
+        const htmlText = await response.text();
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(htmlText, "text/html");
+        
+        // Chọn danh sách hàng
+        const rows = doc.querySelectorAll('table.bxh-page tbody tr');
+        const results = [];
+
+        rows.forEach(row => {
+            // Lấy nút tham gia để trích xuất ID
+            const btn = row.querySelector('button.join-group');
+            const id = btn ? btn.getAttribute('data-group-id') : null;
+
+            // Lấy khu vực tên
+            const nameDiv = row.querySelector('.display-container.group-name');
+
+            // 3. SỬA LỖI LOGIC PARSE TÊN:
+            // Chỉ xử lý khi có đủ ID và Tên
+            if (nameDiv && id) {
+                let levelNum = 0;
+                
+                // Lấy thẻ level riêng biệt
+                const levelSpan = nameDiv.querySelector('.group-level');
+                
+                if (levelSpan) {
+                    const match = levelSpan.textContent.match(/\d+/);
+                    if (match) levelNum = parseInt(match[0], 10);
+                }
+
+                // Lấy tên sạch:
+                // Thay vì cloneNode (nặng), ta lấy toàn bộ text rồi xóa phần text của level đi
+                let nameText = nameDiv.innerText;
+                if (levelSpan) {
+                    nameText = nameText.replace(levelSpan.innerText, '').trim();
+                } else {
+                    nameText = nameText.trim();
+                }
+
+                results.push({
+                    id: id,
+                    name: nameText,
+                    level: levelNum
+                });
+            }
+        });
+
+        return results;
+
+    } catch (error) {
+        // Ghi log lỗi để dễ debug
+        console.error("Lỗi tại getListTongMon:", error);
+        // Ném lỗi tiếp ra ngoài để hàm gọi bên ngoài biết là có lỗi
+        throw error;
+    }
+}
 
 
         parseGroupRoleHtml(groupRoleHtml) {
