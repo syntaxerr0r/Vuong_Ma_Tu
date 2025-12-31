@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey
-// @version       5.0.2
+// @version       5.0.3
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.gg/*
@@ -1250,9 +1250,16 @@
         isMonthlyRewardClaimed = taskTracker.getTaskStatus(accountId, 'phucloi', 'monthly_reward_claimed');
         if (isMonthlyRewardClaimed) {return;}
 
-        const today = new Date();
-        const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();  // Last day of month
-        if (today.getDate() >= lastDay - 1) {
+        // Tính mốc 00:00 hai ngày cuối tháng theo giờ VN
+        const now = new Date();
+        const tzNow = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Ho_Chi_Minh' }));
+        const startOfToday = new Date(tzNow.getFullYear(), tzNow.getMonth(), tzNow.getDate());
+        const startOfTomorrow = new Date(startOfToday);
+        startOfTomorrow.setDate(startOfTomorrow.getDate() + 1);
+        const startOfLastTwoDays = new Date(tzNow.getFullYear(), tzNow.getMonth() + 1, 0); // 00:00 last day
+        startOfLastTwoDays.setDate(startOfLastTwoDays.getDate() - 1); // lùi về 00:00 ngày kế cuối
+
+        if (startOfToday >= startOfLastTwoDays && tzNow < startOfTomorrow) {
             console.log('[HH3D Phúc Lợi Đường] 🎉 Đang nhận thưởng cuối tháng...');
             for (let i = 1; i <= 4; i++) {
                 const payloadBonus = new URLSearchParams();
