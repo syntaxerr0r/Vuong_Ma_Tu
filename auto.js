@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey
-// @version       5.1.1
+// @version       5.2
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.li/*
@@ -2837,7 +2837,7 @@
          * @returns {Promise<Array>}
          */
         async searchEnemiesInMines(enemyList, tongMonList) {
-            // 1. Chuẩn bị bộ lọc
+            // 1. Chuẩn bị bộ lọc (Giữ nguyên)
             const enemySet = new Set((enemyList || []).map(x => String(x).trim()).filter(Boolean));
             const tongIdSet = new Set((tongMonList || []).map(x => String(x).trim()).filter(Boolean));
 
@@ -2846,7 +2846,7 @@
                 return [];
             }
 
-            // Map ID tông -> tên tông
+            // Map tên tông (Giữ nguyên)
             let tongNameSet = new Set();
             if (tongIdSet.size > 0) {
                 try {
@@ -2855,72 +2855,63 @@
                         (allTong || []).filter(t => tongIdSet.has(String(t.id)))
                         .map(t => String(t.name || '').trim()).filter(Boolean)
                     );
-                } catch (e) {
-                    console.warn('[Khoáng Mạch] Lỗi lấy tên tông:', e);
-                }
+                } catch (e) {}
             }
 
-            // 2. Logic Smart Cache: Kiểm tra Server trước
+            // 2. Logic Lấy dữ liệu
             let minesData = [];
             let dataTimestamp = 0;
-            let dataSource = '☁️ Server (Cache)'; // Mặc định là lấy từ cloud
+            let dataSource = '☁️ Server (Cache)'; 
 
             try {
                 console.log('[Khoáng Mạch] Đang kiểm tra dữ liệu trên Server...');
                 const serverData = await fetch(this.MINE_DATA_API_URL).then(r => r.json());
                 const now = Date.now();
-                const CACHE_DURATION = 5 * 60 * 1000; // 5 phút
-
-                if (serverData && serverData.timestamp && (now - serverData.timestamp < CACHE_DURATION)) {
-                    // Dữ liệu còn mới (< 5 phút) -> Dùng luôn
+                
+                if (serverData && serverData.timestamp && (now - serverData.timestamp < 5 * 60 * 1000)) {
                     minesData = serverData.mines || [];
                     dataTimestamp = serverData.timestamp;
-                    showNotification(`Đã lấy dữ liệu từ Server (Cập nhật ${this.timeSince(dataTimestamp)})`, 'success');
+                    showNotification(`Dữ liệu từ Server (${this.timeSince(dataTimestamp)})`, 'success');
                 } else {
-                    // Dữ liệu cũ hoặc không có -> Phải quét tay
-                    throw new Error('Dữ liệu cũ, tiến hành quét mới.');
+                    throw new Error('Dữ liệu cũ');
                 }
             } catch (err) {
                 console.log('[Khoáng Mạch] ' + err.message);
-                dataSource = '🕵️ Quét trực tiếp'; // Chuyển sang chế độ quét tay
-                showNotification('Dữ liệu Server cũ/lỗi. Đang quét trực tiếp...', 'info');
+                dataSource = '🕵️ Quét trực tiếp';
+                showNotification('Đang quét trực tiếp...', 'info');
                 
-                // Quét toàn bộ mỏ
+                // Quét mới
                 minesData = await this.scanAllMinesRawData();
                 dataTimestamp = Date.now();
 
-                // Đẩy dữ liệu mới lên Server (chạy ngầm, không await để đỡ tốn time user)
+                // Upload lên server (Dùng hàm đã sửa header ở trên)
                 this.uploadDataToServer(minesData);
-                if (minesData && minesData.length > 0) {
-                    minesData = minesData.map(m => ({
-                        ...m,
-                        users: (m.users || []).map(u => ({
-                            // Ưu tiên lấy key rút gọn (i), nếu không có thì lấy key gốc (id)
-                            id: u.i || u.id,                     
-                            name: u.n || u.name,
-                            tongMonName: u.t || u.tongMonName,
-                            role: u.r || u.role,
-                            ...u // Giữ lại các thuộc tính khác (nếu có)
-                        }))
-                    }));
-                }
             }
 
-            // 3. Lọc dữ liệu (Filter)
-            // Lúc này minesData chứa toàn bộ người chơi trong các mỏ, giờ mới lọc ra kẻ địch
-            const results = [];
-            
-            for (const mine of minesData) {
-                if (!mine.users || mine.users.length === 0) continue;
+            // 🔥 BƯỚC QUAN TRỌNG: CHUẨN HÓA DỮ LIỆU (Normalize)
+            // Phải đặt ở đây để chạy cho CẢ trường hợp lấy từ Server HOẶC quét mới
+            if (minesData && minesData.length > 0) {
+                minesData = minesData.map(m => ({
+                    ...m,
+                    users: (m.users || []).map(u => ({
+                        // Map key ngắn (i, n, t, r) -> key dài (id, name...)
+                        id: u.i || u.id,                     
+                        name: u.n || u.name,
+                        tongMonName: u.t || u.tongMonName,
+                        role: u.r || u.role,
+                        ...u 
+                    }))
+                }));
+            }
 
+            // 3. Lọc & Hiển thị (Giữ nguyên)
+            const results = [];
+            for (const mine of minesData) {
+                if (!mine.users) continue;
                 for (const u of mine.users) {
                     const uid = String(u.id ?? '').trim();
                     const uTong = String(u.tongMonName || '').trim();
-
-                    const matchById = enemySet.has(uid);
-                    const matchByTong = tongNameSet.has(uTong);
-
-                    if (matchById || matchByTong) {
+                    if (enemySet.has(uid) || tongNameSet.has(uTong)) {
                         results.push({
                             ...u,
                             mineId: mine.id,
@@ -2932,15 +2923,10 @@
                 }
             }
 
-            // 4. Hiển thị kết quả
             this.showEnemySearchResults(results, dataTimestamp, dataSource);
-            // Lưu đầy đủ thông tin để nút "Xem lại" có thể hiển thị đúng
-            const storageData = {
-                results: results,
-                timestamp: dataTimestamp,
-                source: dataSource
-            };
+            const storageData = { results, timestamp: dataTimestamp, source: dataSource };
             sessionStorage.setItem('khoangmach_enemy_search_results', JSON.stringify(storageData));
+            
             return results;
         }
 
@@ -3059,7 +3045,7 @@
                 // (Tùy chọn) Log dung lượng để kiểm tra xem có quá 50KB không
                 console.log(`[Khoáng Mạch] Payload size: ~${Math.round(payload.length/1024)} KB`);
 
-                await fetch(API_URL, {
+                await fetch(this.MINE_DATA_API_URL, {
                     method: 'POST',
                     mode: 'no-cors', 
                     headers: { 'Content-Type': 'application/json' },
@@ -6304,22 +6290,81 @@
             }
         }
 
-        async  getTuVi(userId) {
+        async getTuVi(userId) {
+            // 1. Kiểm tra và lấy Nonce nếu chưa có
             if (!this.nonce) {
                 this.nonce = await this.getNonce();
             }
             const nonce = this.nonce;
             if (!nonce) return null;
+
+            const headers = {
+                "Content-Type": "application/json",
+                "X-WP-Nonce": nonce
+            };
+
+            let tuVi = null;
+
             try {
-                const res = await fetch(`${weburl}/wp-json/luan-vo/v1/search-users`, {
+                // --- BƯỚC 1: FOLLOW USER ---
+                // endpoint: /follow
+                // body: { followed_user_id: "ID" }
+                await fetch(`${weburl}/wp-json/luan-vo/v1/follow`, {
                     method: "POST",
-                    headers: { "Content-Type": "application/json", "X-WP-Nonce": nonce },
-                    body: JSON.stringify({ query: String(userId), page: 1 }),
+                    headers: headers,
+                    body: JSON.stringify({ followed_user_id: String(userId) }),
                     credentials: "include",
                     mode: "cors"
                 });
-                return res.ok ? (await res.json())?.data?.users?.[0]?.points ?? null : null;
-            } catch { return null; }
+
+                // --- BƯỚC 2: LẤY DANH SÁCH FOLLOWING ---
+                // endpoint: /get-following-users
+                // body: { page: 1 }
+                const resList = await fetch(`${weburl}/wp-json/luan-vo/v1/get-following-users`, {
+                    method: "POST",
+                    headers: headers,
+                    body: JSON.stringify({ page: 1 }),
+                    credentials: "include",
+                    mode: "cors"
+                });
+
+                if (resList.ok) {
+                    const jsonResponse = await resList.json();
+                    
+                    if (jsonResponse.success && jsonResponse.data && Array.isArray(jsonResponse.data.users)) {
+                        
+                        // Tìm user có id trùng khớp trong mảng users
+                        // Ép kiểu String để đảm bảo so sánh đúng (ví dụ 28003 == "28003")
+                        const targetUser = jsonResponse.data.users.find(u => String(u.id) === String(userId));
+                        
+                        if (targetUser) {
+                            tuVi = targetUser.points; // Lấy giá trị points
+                            console.log(`[GetTuVi] Đã tìm thấy ID ${userId}: ${tuVi} Tu Vi`);
+                        }
+                    }
+                }
+
+            } catch (e) {
+                console.error(`Lỗi khi lấy tu vi (Logic Follow):`, e);
+            } finally {
+                // --- BƯỚC 3: UNFOLLOW USER (Dọn dẹp) ---
+                // endpoint: /unfollow
+                // body: { unfollow_user_id: "ID" }
+                // Luôn chạy bước này để không làm rác danh sách theo dõi
+                try {
+                    await fetch(`${weburl}/wp-json/luan-vo/v1/unfollow`, {
+                        method: "POST",
+                        headers: headers,
+                        body: JSON.stringify({ unfollow_user_id: String(userId) }),
+                        credentials: "include",
+                        mode: "cors"
+                    });
+                } catch (errUnfollow) {
+                    console.error(`Lỗi khi unfollow user ${userId}:`, errUnfollow);
+                }
+            }
+
+            return tuVi;
         }
 
         async showTotalEnemies(mineId) {
