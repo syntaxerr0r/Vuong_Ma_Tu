@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey
-// @version       5.2
+// @version       5.2.1
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.li/*
@@ -6346,6 +6346,7 @@
                 });
 
                 // B2.2: Lấy danh sách Following
+                await new Promise(resolve => setTimeout(resolve, 200));
                 const resList = await fetch(`${weburl}/wp-json/luan-vo/v1/get-following-users`, {
                     method: "POST",
                     headers: headers,
@@ -6369,6 +6370,7 @@
                 console.error(`[GetTuVi] Fallback lỗi:`, e);
             } finally {
                 // B2.3: Unfollow (Luôn chạy để dọn rác)
+                await new Promise(resolve => setTimeout(resolve, 100));
                 try {
                     await fetch(`${weburl}/wp-json/luan-vo/v1/unfollow`, {
                         method: "POST",
