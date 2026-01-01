@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey
-// @version       5.0.4
+// @version       5.1
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.li/*
@@ -18,7 +18,7 @@
     // ===============================================
     // HÀM TIỆN ÍCH CHUNG
     // ===============================================
-    const weburl = 'https://hoathinh3d.li/';
+    const weburl = window.location.origin.replace(/\/+$/, '') + '/';
     const ajaxUrl = weburl + 'wp-content/themes/halimmovies-child/hh3d-ajax.php';
     let questionDataCache = null;
     const QUESTION_DATA_URL = 'https://raw.githubusercontent.com/syntaxerr0r/Vuong_Ma_Tu/refs/heads/main/vandap.json';
@@ -120,60 +120,67 @@
      */
     async function getSecurityToken(url) {
         const logPrefix = "[SecurityTokenFetcher]";
-        let htmlContent = null; // Nơi lưu trữ HTML để quét
+        let htmlContent = null;
 
         try {
+            // 1. Lấy nội dung HTML (Fetch hoặc quét trang hiện tại)
             if (url) {
-                // --- KỊCH BẢN 1: Fetch từ URL được cung cấp ---
-                console.log(`${logPrefix} ℹ️ Đang fetch từ URL: ${url}`);
                 const response = await fetch(url);
-
-                if (!response.ok) {
-                    console.error(`${logPrefix} ❌ Lỗi khi fetch URL: ${response.status} ${response.statusText}`);
-                    return null;
-                }
+                if (!response.ok) return null;
                 htmlContent = await response.text();
-
             } else {
-                // --- KỊCH BẢN 2: Lấy từ HTML trang hiện tại ---
-                console.log(`${logPrefix} ℹ️ Không có URL, đang quét trang hiện tại...`);
                 htmlContent = document.documentElement.outerHTML;
-                if (!htmlContent) {
-                    console.error(`${logPrefix} ❌ Không thể đọc HTML của trang hiện tại.`);
-                    return null;
-                }
             }
 
-            // --- PHẦN CHUNG: Quét Regex ---
-            // Sau khi đã có htmlContent từ 1 trong 2 kịch bản, tiến hành quét
+            // 2. Quét Regex lấy Token mới
             const regex = /"securityToken"\s*:\s*"([^"]+)"/;
             const match = htmlContent.match(regex);
 
             if (match && match[1]) {
                 const token = match[1];
-                console.log(`${logPrefix} ✅ Lấy thành công token.`);
+                
+                // ============================================================
+                // 🔥 SỬA LỖI: CẬP NHẬT XUYÊN SANDBOX
+                // ============================================================
 
-                // Cập nhật biến toàn cục hh3dData nếu có
-         //       try {
-          //          if (typeof window !== 'undefined' && window.hh3dData && typeof window.hh3dData === 'object') {
-           //             window.hh3dData.securityToken = token;
-          //              console.log(`${logPrefix} 🔄 Đã cập nhật window.hh3dData.securityToken`);
-           //         } else {
-         //               console.log(`${logPrefix} ⚠️ window.hh3dData không tồn tại hoặc không phải object — bỏ qua cập nhật.`);
-         //           }
-         //       } catch (err) {
-          //          console.warn(`${logPrefix} ⚠️ Không thể cập nhật hh3dData:`, err);
-          //      }
+                // Cách 1: Dùng unsafeWindow (Cách chuẩn của Tampermonkey)
+                // Đây là biến trỏ thẳng vào window thật của trang web
+                if (typeof unsafeWindow !== 'undefined' && unsafeWindow.hh3dData) {
+                    unsafeWindow.hh3dData.securityToken = token;
+                    console.log(`${logPrefix} 🔓 Đã cập nhật hh3dData thông qua unsafeWindow.`);
+                } 
+                // Cách 2: Fallback nếu không có unsafeWindow (Dùng window thường)
+                else if (typeof window.hh3dData !== 'undefined') {
+                    window.hh3dData.securityToken = token;
+                    console.log(`${logPrefix} ⚠️ Đã cập nhật hh3dData qua window thường (Có thể bị chặn bởi Sandbox).`);
+                }
 
-                return token; // Trả về token
-            } else {
-                console.error(`${logPrefix} ❌ Không tìm thấy 'securityToken' trong nội dung HTML.`);
-                return null;
+                // Cách 3: "Tiêm thuốc" trực tiếp (Mạnh nhất - Chắc chắn 100%)
+                // Tạo một thẻ script nhỏ, nhúng vào trang để nó tự chạy lệnh update chính nó
+                try {
+                    const script = document.createElement('script');
+                    script.textContent = `
+                        try {
+                            if (typeof hh3dData !== 'undefined') {
+                                hh3dData.securityToken = "${token}";
+                                console.log('✅ [Inject] Token đã được cập nhật từ bên trong trang web.');
+                            }
+                        } catch(e) {}
+                    `;
+                    (document.head || document.body || document.documentElement).appendChild(script);
+                    script.remove(); // Chạy xong xóa luôn dấu vết
+                } catch (injectErr) {
+                    console.warn(`${logPrefix} Lỗi tiêm script:`, injectErr);
+                }
+                
+                // ============================================================
+
+                return token; 
             }
+            return null;
 
         } catch (e) {
-            // Bắt lỗi chung cho cả kịch bản fetch và kịch bản đọc DOM
-            console.error(`${logPrefix} ❌ Lỗi nghiêm trọng:`, e);
+            console.error(`${logPrefix} ❌ Lỗi:`, e);
             return null;
         }
     }
@@ -1247,7 +1254,7 @@
         }
 
         //Claim bonus reward on the last 2 day of the month
-        isMonthlyRewardClaimed = taskTracker.getTaskStatus(accountId, 'phucloi', 'monthly_reward_claimed');
+        const isMonthlyRewardClaimed = taskTracker.getTaskStatus(accountId, 'phucloi').monthly_reward_claimed;
         if (isMonthlyRewardClaimed) {return;}
 
         // Tính mốc 00:00 hai ngày cuối tháng theo giờ VN
@@ -1257,15 +1264,16 @@
         const startOfTomorrow = new Date(startOfToday);
         startOfTomorrow.setDate(startOfTomorrow.getDate() + 1);
         const startOfLastTwoDays = new Date(tzNow.getFullYear(), tzNow.getMonth() + 1, 0); // 00:00 last day
-        startOfLastTwoDays.setDate(startOfLastTwoDays.getDate() - 1); // lùi về 00:00 ngày kế cuối
+        startOfLastTwoDays.setDate(startOfLastTwoDays.getDate() - 30); // lùi về 00:00 ngày kế cuối
 
         if (startOfToday >= startOfLastTwoDays && tzNow < startOfTomorrow) {
             console.log('[HH3D Phúc Lợi Đường] 🎉 Đang nhận thưởng cuối tháng...');
+            const securityNonceMonthly = await getSecurityNonce(weburl + 'phuc-loi-duong?t', /action: 'claim_bonus_reward',[\s\S]*?security: '([a-f0-9]+)'/);
             for (let i = 1; i <= 4; i++) {
                 const payloadBonus = new URLSearchParams();
                 payloadBonus.append('action', 'claim_bonus_reward');
                 payloadBonus.append('chest_id', i);
-                payloadBonus.append('security', securityNonce);
+                payloadBonus.append('security', securityNonceMonthly);
                 try {
                     const responseBonus = await fetch(url, {
                         method: 'POST',
@@ -1284,6 +1292,8 @@
                             taskTracker.updateTask(accountId, 'phucloi', 'monthly_reward_claimed', true);
                         }
                         continue; // skip already claimed
+                    } else if (dataBonus.data.message === 'Chưa đủ yêu cầu nhận thưởng.') {
+                        if (i === 1) {return;} // skip if first chest not eligible
                     } else {
                         showNotification(dataBonus.data.message, 'info');
                     }
@@ -2167,6 +2177,7 @@
             this.getUsersInMineNonce = null;
             this.securityToken = null;
             this.buffBought = false;
+            this.MINE_DATA_API_URL = 'https://script.google.com/macros/s/AKfycbxJoJniBQP6JHLpSHbLwYqmoihZj0YZ9qIWp9LsJoJOCANJPTiu7s8_6v9ecVZjtD40/exec';
         }
 
         delay(ms) {
@@ -2685,74 +2696,74 @@
          * @returns {Promise<Array<{id: string, name: string, level: number}>>} Mảng đối tượng tổng môn
          * ví dụ: [{id: "123", name: "Tông Môn A", level: 6}, ...]
          */
- async getListTongMon() {
-    try {
-        // 1. SỬA LỖI LOGIC URL: 
-        // Dùng đường dẫn tương đối "/" để tự động lấy domain hiện tại.
-        // Không cần biến "weburl" (tránh lỗi weburl is not defined).
-        const response = await fetch("/danh-sach-cac-tong-mon-tai-hoathinh3d");
+        async getListTongMon() {
+            try {
+                // 1. SỬA LỖI LOGIC URL: 
+                // Dùng đường dẫn tương đối "/" để tự động lấy domain hiện tại.
+                // Không cần biến "weburl" (tránh lỗi weburl is not defined).
+                const response = await fetch("/danh-sach-cac-tong-mon-tai-hoathinh3d");
 
-        // Kiểm tra trạng thái HTTP
-        if (!response.ok) {
-            throw new Error(`Lỗi kết nối: ${response.status} ${response.statusText}`);
-        }
-
-        // 2. Chuyển đổi dữ liệu
-        const htmlText = await response.text();
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(htmlText, "text/html");
-        
-        // Chọn danh sách hàng
-        const rows = doc.querySelectorAll('table.bxh-page tbody tr');
-        const results = [];
-
-        rows.forEach(row => {
-            // Lấy nút tham gia để trích xuất ID
-            const btn = row.querySelector('button.join-group');
-            const id = btn ? btn.getAttribute('data-group-id') : null;
-
-            // Lấy khu vực tên
-            const nameDiv = row.querySelector('.display-container.group-name');
-
-            // 3. SỬA LỖI LOGIC PARSE TÊN:
-            // Chỉ xử lý khi có đủ ID và Tên
-            if (nameDiv && id) {
-                let levelNum = 0;
-                
-                // Lấy thẻ level riêng biệt
-                const levelSpan = nameDiv.querySelector('.group-level');
-                
-                if (levelSpan) {
-                    const match = levelSpan.textContent.match(/\d+/);
-                    if (match) levelNum = parseInt(match[0], 10);
+                // Kiểm tra trạng thái HTTP
+                if (!response.ok) {
+                    throw new Error(`Lỗi kết nối: ${response.status} ${response.statusText}`);
                 }
 
-                // Lấy tên sạch:
-                // Thay vì cloneNode (nặng), ta lấy toàn bộ text rồi xóa phần text của level đi
-                let nameText = nameDiv.innerText;
-                if (levelSpan) {
-                    nameText = nameText.replace(levelSpan.innerText, '').trim();
-                } else {
-                    nameText = nameText.trim();
-                }
+                // 2. Chuyển đổi dữ liệu
+                const htmlText = await response.text();
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(htmlText, "text/html");
+                
+                // Chọn danh sách hàng
+                const rows = doc.querySelectorAll('table.bxh-page tbody tr');
+                const results = [];
 
-                results.push({
-                    id: id,
-                    name: nameText,
-                    level: levelNum
+                rows.forEach(row => {
+                    // Lấy nút tham gia để trích xuất ID
+                    const btn = row.querySelector('button.join-group');
+                    const id = btn ? btn.getAttribute('data-group-id') : null;
+
+                    // Lấy khu vực tên
+                    const nameDiv = row.querySelector('.display-container.group-name');
+
+                    // 3. SỬA LỖI LOGIC PARSE TÊN:
+                    // Chỉ xử lý khi có đủ ID và Tên
+                    if (nameDiv && id) {
+                        let levelNum = 0;
+                        
+                        // Lấy thẻ level riêng biệt
+                        const levelSpan = nameDiv.querySelector('.group-level');
+                        
+                        if (levelSpan) {
+                            const match = levelSpan.textContent.match(/\d+/);
+                            if (match) levelNum = parseInt(match[0], 10);
+                        }
+
+                        // Lấy tên sạch:
+                        // Thay vì cloneNode (nặng), ta lấy toàn bộ text rồi xóa phần text của level đi
+                        let nameText = nameDiv.innerText;
+                        if (levelSpan) {
+                            nameText = nameText.replace(levelSpan.innerText, '').trim();
+                        } else {
+                            nameText = nameText.trim();
+                        }
+
+                        results.push({
+                            id: id,
+                            name: nameText,
+                            level: levelNum
+                        });
+                    }
                 });
+
+                return results;
+
+            } catch (error) {
+                // Ghi log lỗi để dễ debug
+                console.error("Lỗi tại getListTongMon:", error);
+                // Ném lỗi tiếp ra ngoài để hàm gọi bên ngoài biết là có lỗi
+                throw error;
             }
-        });
-
-        return results;
-
-    } catch (error) {
-        // Ghi log lỗi để dễ debug
-        console.error("Lỗi tại getListTongMon:", error);
-        // Ném lỗi tiếp ra ngoài để hàm gọi bên ngoài biết là có lỗi
-        throw error;
-    }
-}
+        }
 
 
         parseGroupRoleHtml(groupRoleHtml) {
@@ -2816,6 +2827,7 @@
          * @returns {Promise<Array>}
          */
         async searchEnemiesInMines(enemyList, tongMonList) {
+            // 1. Chuẩn bị bộ lọc
             const enemySet = new Set((enemyList || []).map(x => String(x).trim()).filter(Boolean));
             const tongIdSet = new Set((tongMonList || []).map(x => String(x).trim()).filter(Boolean));
 
@@ -2824,302 +2836,424 @@
                 return [];
             }
 
-            // Map ID tông -> tên tông (vì group_role_html chỉ có tên)
+            // Map ID tông -> tên tông
             let tongNameSet = new Set();
             if (tongIdSet.size > 0) {
                 try {
-                    const allTong = await this.getListTongMon(); // [{id,name,level}, ...]
+                    const allTong = await this.getListTongMon();
                     tongNameSet = new Set(
-                        (allTong || [])
-                            .filter(t => tongIdSet.has(String(t.id)))
-                            .map(t => String(t.name || '').trim())
-                            .filter(Boolean)
+                        (allTong || []).filter(t => tongIdSet.has(String(t.id)))
+                        .map(t => String(t.name || '').trim()).filter(Boolean)
                     );
                 } catch (e) {
-                    console.warn('[Khoáng Mạch] Không tải được list tông môn để map ID->Tên:', e);
+                    console.warn('[Khoáng Mạch] Lỗi lấy tên tông:', e);
                 }
             }
 
-            const allMines = await this.getAllMines();
-            if (!allMines || !allMines.minesData || allMines.minesData.length === 0) {
-                showNotification('Không tải được danh sách mỏ khoáng mạch.', 'error');
-                return [];
+            // 2. Logic Smart Cache: Kiểm tra Server trước
+            let minesData = [];
+            let dataTimestamp = 0;
+            let dataSource = '☁️ Server (Cache)'; // Mặc định là lấy từ cloud
+
+            try {
+                console.log('[Khoáng Mạch] Đang kiểm tra dữ liệu trên Server...');
+                const serverData = await fetch(this.MINE_DATA_API_URL).then(r => r.json());
+                const now = Date.now();
+                const CACHE_DURATION = 5 * 60 * 1000; // 5 phút
+
+                if (serverData && serverData.timestamp && (now - serverData.timestamp < CACHE_DURATION)) {
+                    // Dữ liệu còn mới (< 5 phút) -> Dùng luôn
+                    minesData = serverData.mines || [];
+                    dataTimestamp = serverData.timestamp;
+                    showNotification(`Đã lấy dữ liệu từ Server (Cập nhật ${this.timeSince(dataTimestamp)})`, 'success');
+                } else {
+                    // Dữ liệu cũ hoặc không có -> Phải quét tay
+                    throw new Error('Dữ liệu cũ, tiến hành quét mới.');
+                }
+            } catch (err) {
+                console.log('[Khoáng Mạch] ' + err.message);
+                dataSource = '🕵️ Quét trực tiếp'; // Chuyển sang chế độ quét tay
+                showNotification('Dữ liệu Server cũ/lỗi. Đang quét trực tiếp...', 'info');
+                
+                // Quét toàn bộ mỏ
+                minesData = await this.scanAllMinesRawData();
+                dataTimestamp = Date.now();
+
+                // Đẩy dữ liệu mới lên Server (chạy ngầm, không await để đỡ tốn time user)
+                this.uploadDataToServer(minesData);
+                if (minesData && minesData.length > 0) {
+                    minesData = minesData.map(m => ({
+                        ...m,
+                        users: (m.users || []).map(u => ({
+                            // Ưu tiên lấy key rút gọn (i), nếu không có thì lấy key gốc (id)
+                            id: u.i || u.id,                     
+                            name: u.n || u.name,
+                            tongMonName: u.t || u.tongMonName,
+                            role: u.r || u.role,
+                            ...u // Giữ lại các thuộc tính khác (nếu có)
+                        }))
+                    }));
+                }
             }
 
-            // ✅ CHỈ TÌM TRONG MỎ GOLD + SILVER
-            const allowedTypes = new Set(['gold', 'silver']);
-            const filteredMines = allMines.minesData.filter(m => allowedTypes.has(String(m.type)));
-            const allMinesIds = filteredMines.map(m => m.id);
-
-            // map nhanh mineId -> mineName
-            const mineNameById = new Map(filteredMines.map(m => [String(m.id), m.name]));
-
-            this.securityToken = await getSecurityToken(this.khoangMachUrl);
-
+            // 3. Lọc dữ liệu (Filter)
+            // Lúc này minesData chứa toàn bộ người chơi trong các mỏ, giờ mới lọc ra kẻ địch
             const results = [];
+            
+            for (const mine of minesData) {
+                if (!mine.users || mine.users.length === 0) continue;
 
-            for (let mineId of allMinesIds) {
-                const mineInfo = await this.getUsersInMine(mineId);
-                if (!mineInfo || !mineInfo.users || mineInfo.users.length === 0) continue;
-
-                const mineName = mineNameById.get(String(mineId)) || 'Unknown';
-
-                for (const u of mineInfo.users) {
+                for (const u of mine.users) {
                     const uid = String(u.id ?? '').trim();
-                    const extra = this.parseGroupRoleHtml(u.group_role_html);
-                    const userTongName = String(extra.tongMonName || '').trim();
+                    const uTong = String(u.tongMonName || '').trim();
 
-                    const matchById = enemySet.size > 0 && enemySet.has(uid);
-                    const matchByTong =
-                        tongNameSet.size > 0 &&
-                        userTongName &&
-                        tongNameSet.has(userTongName);
+                    const matchById = enemySet.has(uid);
+                    const matchByTong = tongNameSet.has(uTong);
 
                     if (matchById || matchByTong) {
                         results.push({
                             ...u,
-                            mineId,
-                            mineName,
-                            tongMonName: extra.tongMonName,
-                            role: extra.role
+                            mineId: mine.id,
+                            mineName: mine.name,
+                            tongMonName: u.tongMonName,
+                            role: u.role
                         });
                     }
                 }
-
-                await new Promise(r => setTimeout(r, 300));
             }
 
-            this.showEnemySearchResults(results);
-            sessionStorage.setItem('khoangmach_enemy_search_results', JSON.stringify(results));
+            // 4. Hiển thị kết quả
+            this.showEnemySearchResults(results, dataTimestamp, dataSource);
+            // Lưu đầy đủ thông tin để nút "Xem lại" có thể hiển thị đúng
+            const storageData = {
+                results: results,
+                timestamp: dataTimestamp,
+                source: dataSource
+            };
+            sessionStorage.setItem('khoangmach_enemy_search_results', JSON.stringify(storageData));
             return results;
         }
 
+        // Hàm phụ: Quét toàn bộ mỏ (Trả về dữ liệu thô để upload)
+        async scanAllMinesRawData() {
+                console.log(`${this.logPrefix} 🕵️ Bắt đầu quét toàn bộ mỏ (Mode: Raw Data)...`);
+
+                // --- BƯỚC 1: LẤY DANH SÁCH MỎ & LỌC ---
+                const allMines = await this.getAllMines();
+                if (!allMines || !allMines.minesData) return [];
+
+                // Chỉ lấy mỏ Gold/Silver
+                const allowedTypes = new Set(['gold', 'silver']);
+                const filteredMines = allMines.minesData.filter(m => allowedTypes.has(String(m.type)));
+                
+                if (filteredMines.length === 0) return [];
+
+                // --- BƯỚC 2: CHUẨN BỊ TOKEN & NONCE (CHỈ LÀM 1 LẦN) ---
+                
+                // 2a. Lấy Security Nonce (cho action get_users_in_mine)
+                let nonce = this.getUsersInMineNonce; // Kiểm tra cache xem có sẵn không
+                if (!nonce) {
+                    console.log(`${this.logPrefix} ♻️ Đang lấy Nonce mới...`);
+                    // Gọi hàm getNonce (hoặc logic fetch regex tương đương)
+                    nonce = await this.#getNonce(/action:\s*'get_users_in_mine',[\s\S]*?security:\s*'([a-f0-9]+)'/);
+                    if (nonce) {
+                        this.getUsersInMineNonce = nonce; // Lưu cache
+                    }
+                }
+
+                // 2b. Lấy Security Token (Session)
+                if (!this.securityToken) {
+                    console.log(`${this.logPrefix} 🔑 Đang lấy Token mới...`);
+                    this.securityToken = await getSecurityToken(this.khoangMachUrl);
+                }
+
+                // 2c. Kiểm tra lần cuối, nếu thiếu 1 trong 2 thì hủy quét
+                if (!nonce || !this.securityToken) {
+                    console.error(`${this.logPrefix} ❌ Không thể quét: Thiếu Token hoặc Nonce.`);
+                    showNotification('Lỗi chuẩn bị dữ liệu quét mỏ.', 'error');
+                    return [];
+                }
+
+                // --- BƯỚC 3: VÒNG LẶP QUÉT (DÙNG LẠI TOKEN & NONCE) ---
+                const rawResult = [];
+                console.log(`${this.logPrefix} 🚀 Bắt đầu quét ${filteredMines.length} mỏ...`);
+
+                for (let i = 0; i < filteredMines.length; i++) {
+                    const m = filteredMines[i];
+                    
+                    // Payload dùng chung nonce và securityToken đã lấy ở Bước 2
+                    const payload = new URLSearchParams({
+                        action: 'get_users_in_mine',
+                        mine_id: m.id,
+                        security_token: this.securityToken, 
+                        security: nonce
+                    });
+
+                    try {
+                        const r = await fetch(this.ajaxUrl, { 
+                            method: 'POST', 
+                            headers: this.headers, 
+                            body: payload, 
+                            credentials: 'include' 
+                        });
+                        const d = await r.json();
+
+                        if (d.success && d.data && d.data.users && d.data.users.length > 0) {
+                            // MAP DATA SIÊU GỌN (để upload lên server)
+                            const cleanUsers = d.data.users.map(u => {
+                                const extra = this.parseGroupRoleHtml(u.group_role_html);
+                                return {
+                                    i: u.id,                                // i = id
+                                    n: u.name,                              // n = name
+                                    t: String(extra.tongMonName || '').trim(), // t = tongMon
+                                    r: extra.role                           // r = role
+                                };
+                            });
+
+                            rawResult.push({
+                                id: m.id,
+                                name: m.name,
+                                users: cleanUsers
+                            });
+                        } 
+                        else if (!d.success) {
+                            // Nếu token bị lỗi giữa chừng (hết phiên), có thể break hoặc log
+                            // console.warn(`Lỗi quét mỏ ${m.name}: ${d.data?.message}`);
+                        }
+
+                    } catch (e) {
+                        console.error(`Lỗi mạng mỏ ${m.id}:`, e);
+                    }
+
+                    // Delay để tránh bị chặn (200ms)
+                    await new Promise(resolve => setTimeout(resolve, 200));
+                }
+
+                console.log(`${this.logPrefix} ✅ Hoàn tất quét. Tổng số mỏ có người: ${rawResult.length}`);
+                return rawResult;
+            }
+
+        // Hàm phụ: Upload lên Server
+        async  uploadDataToServer(minesData) {
+            // Check sơ bộ: Nếu không có dữ liệu thì không gửi
+            if (!minesData || minesData.length === 0) return;
+
+            try {
+                console.log(`[Khoáng Mạch] Đang đồng bộ ${minesData.length} mỏ lên server...`);
+                
+                // PAYLOAD Ở ĐÂY:
+                const payload = JSON.stringify({ 
+                    mines: minesData 
+                });
+
+                // (Tùy chọn) Log dung lượng để kiểm tra xem có quá 50KB không
+                console.log(`[Khoáng Mạch] Payload size: ~${Math.round(payload.length/1024)} KB`);
+
+                await fetch(API_URL, {
+                    method: 'POST',
+                    mode: 'no-cors', 
+                    headers: { 'Content-Type': 'application/json' },
+                    body: payload // <--- Gửi cục này
+                });
+                
+                console.log('[Khoáng Mạch] Đã gửi yêu cầu đồng bộ.');
+            } catch (e) {
+                console.warn('[Khoáng Mạch] Lỗi upload:', e);
+            }
+        }
+
+        // Hàm phụ: Format thời gian
+        timeSince(date) {
+            const seconds = Math.floor((new Date() - date) / 1000);
+            let interval = seconds / 31536000;
+            if (interval > 1) return Math.floor(interval) + " năm trước";
+            interval = seconds / 2592000;
+            if (interval > 1) return Math.floor(interval) + " tháng trước";
+            interval = seconds / 86400;
+            if (interval > 1) return Math.floor(interval) + " ngày trước";
+            interval = seconds / 3600;
+            if (interval > 1) return Math.floor(interval) + " giờ trước";
+            interval = seconds / 60;
+            if (interval > 1) return Math.floor(interval) + " phút trước";
+            return Math.floor(seconds) + " giây trước";
+        }
+
         /**
-         * Hộp thoại thông báo tìm kiếm
-         * @param {Array} foundUsers Mảng đối tượng người chơi tìm thấy
-         * Ví dụ: [{id: "123", name: "Người Chơi A", mineId: "1", mineName: "Mỏ A", tongMonName: "Tông Môn A", roleInTong: "Trưởng Lão"}, ...]
+         * Hiển thị kết quả tìm kiếm với thông tin nguồn và thời gian
+         * @param {Array} foundUsers Danh sách kẻ địch tìm thấy
+         * @param {Number} timestamp Thời gian dữ liệu được tạo (Date.now())
+         * @param {String} source Nguồn dữ liệu ('Server' hoặc 'Quét trực tiếp')
          */
-        showEnemySearchResults(foundUsers) {
-            // ✅ Không dùng Swal nữa
+        showEnemySearchResults(foundUsers, timestamp, source = 'N/A') {
+            // 1. Kiểm tra dữ liệu đầu vào
             if (!Array.isArray(foundUsers) || foundUsers.length === 0) {
-                showNotification('Không tìm thấy kẻ địch trong các mỏ khoáng mạch.', 'info');
+                showNotification('Không tìm thấy kẻ địch nào phù hợp trong các mỏ.', 'info');
                 return;
             }
 
             const PANEL_ID = 'enemyDashboard';
             const RESTORE_ID = 'enemyDashboardRestore';
 
-            // cleanup cũ
+            // 2. Xóa panel cũ nếu đang tồn tại
             const oldPanel = document.getElementById(PANEL_ID);
             if (oldPanel) oldPanel.remove();
             const oldRestore = document.getElementById(RESTORE_ID);
             if (oldRestore) oldRestore.remove();
 
-            // escape để tránh inject HTML ngoài ý muốn
-            const esc = (v) =>
-                String(v ?? '')
-                    .replace(/&/g, '&amp;')
-                    .replace(/</g, '&lt;')
-                    .replace(/>/g, '&gt;')
-                    .replace(/"/g, '&quot;')
-                    .replace(/'/g, '&#39;');
+            // 3. Hàm tiện ích: Escape HTML (Chống lỗi hiển thị tên có ký tự lạ)
+            const esc = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-            // group theo mineId + sort theo số lượng địch (desc)
-            const mines = Object.values(
-                foundUsers.reduce((acc, u) => {
-                    const mineId = String(u.mineId ?? 'unknown');
-                    if (!acc[mineId]) {
-                        acc[mineId] = {
-                            mineId,
-                            mineName: u.mineName ?? 'Unknown',
-                            users: [],
-                            tongMons: new Set()
-                        };
-                    }
-                    acc[mineId].users.push(u);
-                    if (u.tongMonName) acc[mineId].tongMons.add(String(u.tongMonName).trim());
-                    return acc;
-                }, {})
-            ).sort((a, b) => (b.users?.length ?? 0) - (a.users?.length ?? 0));
+            // 4. Hàm tiện ích: Tính thời gian (VD: 2 phút trước)
+            const timeSinceStr = (ts) => {
+                if (!ts) return 'Vừa xong';
+                const seconds = Math.floor((Date.now() - ts) / 1000);
+                if (seconds < 60) return `${seconds} giây trước`;
+                const minutes = Math.floor(seconds / 60);
+                if (minutes < 60) return `${minutes} phút trước`;
+                return 'Khá lâu trước';
+            };
 
-            // panel
+            // 5. Gom nhóm user theo MineID
+            const minesMap = foundUsers.reduce((acc, u) => {
+                const mId = String(u.mineId || 'unknown');
+                if (!acc[mId]) {
+                    acc[mId] = {
+                        id: mId,
+                        name: u.mineName || 'Mỏ Lạ',
+                        users: [],
+                        tongMons: new Set()
+                    };
+                }
+                acc[mId].users.push(u);
+                if (u.tongMonName) acc[mId].tongMons.add(u.tongMonName);
+                return acc;
+            }, {});
+
+            // Sắp xếp mỏ nào nhiều địch nhất lên đầu
+            const sortedMines = Object.values(minesMap).sort((a, b) => b.users.length - a.users.length);
+
+            // 6. Tạo giao diện Panel
             const panel = document.createElement('div');
             panel.id = PANEL_ID;
             panel.className = 'enemy-dashboard';
+            
+            // CSS cho Panel
             panel.style.cssText = `
-                position: fixed;
-                right: 20px;
-                bottom: 20px;
-                width: 420px;
-                max-width: calc(100vw - 40px);
-                background: #1f1f1f;
-                color: #fff;
-                border: 1px solid rgba(255,255,255,.12);
-                border-radius: 10px;
-                box-shadow: 0 12px 30px rgba(0,0,0,.45);
-                z-index: 2147483647;
-                font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-                overflow: hidden;
+                position: fixed; right: 20px; bottom: 20px;
+                width: 400px; max-width: 95vw;
+                background: #1a1a1a; color: #e0e0e0;
+                border: 1px solid #444; border-radius: 8px;
+                box-shadow: 0 10px 25px rgba(0,0,0,0.7);
+                z-index: 999999; font-family: sans-serif;
+                display: flex; flex-direction: column;
+                overflow: hidden; font-size: 13px;
             `;
 
+            // Xác định màu sắc cho nguồn dữ liệu
+            const sourceColor = source.includes('Server') ? '#4caf50' : '#ff9800'; // Xanh lá nếu Server, Cam nếu Quét tay
+
+            // Render HTML
             panel.innerHTML = `
-                <div class="ed-header" style="
-                    display:flex; align-items:center; justify-content:space-between;
-                    padding:10px 12px;
-                    background: rgba(255,255,255,.06);
-                    border-bottom: 1px solid rgba(255,255,255,.10);
-                ">
-                    <div style="font-weight:700;">
-                        📊 Phát hiện ${foundUsers.length} kẻ địch
+                <div class="ed-header" style="padding: 10px 12px; background: #2d2d2d; border-bottom: 1px solid #3d3d3d; display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <div style="font-weight: bold; font-size: 14px; color: #fff;">
+                            🎯 Tìm thấy <span style="color: #ff5252;">${foundUsers.length}</span> mục tiêu
+                        </div>
+                        <div style="font-size: 11px; color: #aaa; margin-top: 3px;">
+                            Nguồn: <span style="font-weight:bold; color: ${sourceColor}">${source}</span> • ${timeSinceStr(timestamp)}
+                        </div>
                     </div>
-                    <div class="ed-actions" style="display:flex; gap:8px;">
-                        <button type="button" id="edMin" aria-label="Thu gọn" style="
-                            width: 32px; height: 28px;
-                            border: 0; border-radius: 6px;
-                            background: rgba(255,255,255,.10);
-                            color: #ddd; cursor: pointer;
-                            font-size: 18px; line-height: 1;
-                        ">—</button>
-                        <button type="button" id="edClose" aria-label="Đóng" style="
-                            width: 32px; height: 28px;
-                            border: 0; border-radius: 6px;
-                            background: rgba(255,255,255,.10);
-                            color: #ddd; cursor: pointer;
-                            font-size: 18px; line-height: 1;
-                        ">✕</button>
+                    <div style="display: flex; gap: 8px;">
+                        <button id="edMin" style="background:#3d3d3d; border:none; color:#fff; width:28px; height:28px; border-radius:4px; cursor:pointer;">—</button>
+                        <button id="edClose" style="background:#d32f2f; border:none; color:#fff; width:28px; height:28px; border-radius:4px; cursor:pointer;">✕</button>
                     </div>
                 </div>
 
-                <div class="ed-body" style="
-                    max-height: 400px;
-                    overflow-y: auto;
-                    padding: 10px 12px;
-                ">
-                    ${
-                        mines
-                            .map((mine, idx) => {
-                                const tongMonsText =
-                                    mine.tongMons && mine.tongMons.size
-                                        ? esc([...mine.tongMons].join(', '))
-                                        : 'Không rõ';
-
-                                return `
-                                    <div style="
-                                        border: 1px solid rgba(255,255,255,.12);
-                                        border-radius: 10px;
-                                        margin-bottom: 10px;
-                                        overflow: hidden;
-                                        background: rgba(255,255,255,.04);
-                                    ">
-                                        <div class="mine-header" data-target="mine-${idx}" style="
-                                            cursor: pointer;
-                                            padding: 10px 10px;
-                                            background: rgba(255,255,255,.06);
-                                            display:flex;
-                                            justify-content:space-between;
-                                            align-items:center;
-                                            gap:10px;
-                                        ">
-                                            <div>
-                                                <div style="font-weight:700;">⛏ ${esc(mine.mineName)}</div>
-                                                <div style="font-weight:400; font-size:12px; opacity:.85;">
-                                                    • ${mine.users.length} kẻ địch • Tông môn: ${tongMonsText}
-                                                </div>
-                                            </div>
-                                            <span class="arrow" style="opacity:.85;">▼</span>
+                <div class="ed-body" style="padding: 10px; max-height: 50vh; overflow-y: auto; background: #1a1a1a;">
+                    ${sortedMines.map(mine => {
+                        const tongList = mine.tongMons.size > 0 ? Array.from(mine.tongMons).join(', ') : 'Vô phái';
+                        return `
+                        <div style="margin-bottom: 8px; border: 1px solid #333; border-radius: 6px; overflow: hidden;">
+                            <div class="mine-header" data-target="m-${mine.id}" style="padding: 8px 10px; background: #252525; cursor: pointer; display: flex; justify-content: space-between; align-items: center;">
+                                <div>
+                                    <div style="font-weight: bold; color: #ffd700;">⛏ ${esc(mine.name)}</div>
+                                    <div style="font-size: 11px; color: #888;">Quân số: ${mine.users.length} | Phe: ${esc(tongList)}</div>
+                                </div>
+                                <span class="arrow" style="font-size: 10px; color: #666;">▼</span>
+                            </div>
+                            
+                            <div id="m-${mine.id}" style="display: none; padding: 5px 10px; background: #151515; border-top: 1px solid #333;">
+                                ${mine.users.map(u => `
+                                    <div style="padding: 6px 0; border-bottom: 1px dashed #333; display: flex; justify-content: space-between;">
+                                        <div>
+                                            <div style="color: #ff6b6b; font-weight: 500;">${esc(u.name)}</div>
+                                            <div style="font-size: 11px; color: #777;">${esc(u.tongMonName || 'Vô phái')} - ${esc(u.role || 'Thành viên')}</div>
                                         </div>
-
-                                        <div id="mine-${idx}" class="mine-content" style="display:none; padding:10px;">
-                                            ${
-                                                (mine.users || [])
-                                                    .map(
-                                                        (u) => `
-                                                        <div style="
-                                                            padding: 8px 0;
-                                                            border-bottom: 1px dashed rgba(255,255,255,.18);
-                                                        ">
-                                                            <div style="font-weight:700;">${esc(u.name)}</div>
-                                                            <div style="font-size:12px; opacity:.9;">
-                                                                Tông môn: ${esc(u.tongMonName || 'Chưa rõ')}<br>
-                                                                Chức vụ: ${esc(u.role || 'Chưa rõ')}
-                                                            </div>
-                                                        </div>
-                                                    `
-                                                    )
-                                                    .join('')
-                                            }
+                                        <div style="text-align: right;">
+                                            <a href="/profile/${u.id}" target="_blank" style="font-size: 11px; color: #4fc3f7; text-decoration: none;">Info ↗</a>
                                         </div>
                                     </div>
-                                `;
-                            })
-                            .join('')
-                    }
+                                `).join('')}
+                            </div>
+                        </div>
+                        `;
+                    }).join('')}
                 </div>
             `;
 
             document.body.appendChild(panel);
 
-            // nút restore nổi khi thu gọn
+            // 7. Tạo nút Restore (Khi thu nhỏ)
             const restoreBtn = document.createElement('button');
             restoreBtn.id = RESTORE_ID;
-            restoreBtn.textContent = '📊 Mở dashboard';
+            restoreBtn.textContent = `🎯 Mở lại (${foundUsers.length})`;
             restoreBtn.style.cssText = `
-                display:none;
-                position:fixed;
-                bottom:20px;
-                right:20px;
-                z-index:2147483647;
-                padding:6px 10px;
-                font-size:12px;
-                border-radius:8px;
-                border:1px solid rgba(0,0,0,.25);
-                background:#fff;
-                color:#111;
-                cursor:pointer;
-                pointer-events:auto;
-                box-shadow: 0 8px 20px rgba(0,0,0,.25);
+                display: none; position: fixed; bottom: 20px; right: 20px;
+                padding: 8px 12px; border-radius: 20px;
+                background: #2196f3; color: white; border: none;
+                box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+                cursor: pointer; z-index: 999999; font-weight: bold;
             `;
             document.body.appendChild(restoreBtn);
 
+            // 8. Gán sự kiện (Event Listeners)
             const body = panel.querySelector('.ed-body');
-            const btnMin = panel.querySelector('#edMin');
-            const btnClose = panel.querySelector('#edClose');
-
-            const collapse = () => {
+            
+            // Thu nhỏ
+            panel.querySelector('#edMin').onclick = () => {
                 panel.style.display = 'none';
                 restoreBtn.style.display = 'block';
             };
 
-            const restore = () => {
-                panel.style.display = 'block';
-                restoreBtn.style.display = 'none';
-            };
-
-            btnMin.onclick = collapse;
-            restoreBtn.onclick = restore;
-
-            btnClose.onclick = () => {
+            // Đóng hẳn
+            panel.querySelector('#edClose').onclick = () => {
                 panel.remove();
                 restoreBtn.remove();
             };
 
-            // collapse/expand từng mỏ
-            panel.querySelectorAll('.mine-header').forEach((header) => {
-                header.addEventListener('click', () => {
+            // Mở lại
+            restoreBtn.onclick = () => {
+                panel.style.display = 'flex';
+                restoreBtn.style.display = 'none';
+            };
+
+            // Click từng mỏ để xổ xuống (Accordion)
+            panel.querySelectorAll('.mine-header').forEach(header => {
+                header.onclick = () => {
                     const targetId = header.getAttribute('data-target');
-                    const content = panel.querySelector('#' + targetId);
+                    const content = document.getElementById(targetId);
                     const arrow = header.querySelector('.arrow');
-                    if (!content) return;
-
-                    const open = content.style.display === 'block';
-                    content.style.display = open ? 'none' : 'block';
-                    if (arrow) arrow.textContent = open ? '▼' : '▲';
-                });
+                    if (content) {
+                        const isOpen = content.style.display === 'block';
+                        content.style.display = isOpen ? 'none' : 'block';
+                        if (arrow) arrow.textContent = isOpen ? '▼' : '▲';
+                    }
+                };
             });
-
-            // (tuỳ chọn) auto mở mỏ có nhiều địch nhất
+            
+            // Tự động mở mỏ đầu tiên (nhiều địch nhất) cho tiện
             const firstHeader = panel.querySelector('.mine-header');
-            if (firstHeader) firstHeader.click();
+            if(firstHeader) firstHeader.click();
         }
 
     }
@@ -4647,8 +4781,13 @@
             viewResultsButton.title = 'Xem kết quả tìm kiếm kẻ địch';
             searchButtonRow.appendChild(viewResultsButton);
             const searchResultSaved = sessionStorage.getItem(`khoangmach_enemy_search_results`);
-            let searchResults = searchResultSaved ? JSON.parse(searchResultSaved) : [];
-            if (searchResults.length === 0) {
+            const parsed = searchResultSaved ? JSON.parse(searchResultSaved) : null;
+
+            // Tự động tìm mảng thật sự dù nó là kiểu cũ (Array) hay kiểu mới (Object.results)
+            const realData = Array.isArray(parsed) ? parsed : (parsed?.results || []);
+
+            // Disable nếu không có dữ liệu thật
+            if (realData.length === 0) {
                 viewResultsButton.disabled = true;
             }
 
@@ -4966,9 +5105,27 @@
             });
 
             viewResultsButton.addEventListener('click', () => {
-                const searchResultSaved = sessionStorage.getItem(`khoangmach_enemy_search_results`);
-                const searchResults = searchResultSaved ? JSON.parse(searchResultSaved) : [];
-                khoangmach.showEnemySearchResults(searchResults);
+                const searchResultSaved = sessionStorage.getItem('khoangmach_enemy_search_results');
+                
+                if (searchResultSaved) {
+                    try {
+                        const parsed = JSON.parse(searchResultSaved);
+
+                        // Kiểm tra xem dữ liệu là định dạng MỚI (object) hay CŨ (array) để tránh lỗi
+                        if (Array.isArray(parsed)) {
+                            // Nếu lỡ là dữ liệu cũ (chỉ có mảng), ta fake tạm thời gian
+                            khoangmach.showEnemySearchResults(parsed, Date.now(), 'Bộ nhớ tạm');
+                        } else {
+                            // Nếu là dữ liệu mới (có timestamp và source)
+                            khoangmach.showEnemySearchResults(parsed.results, parsed.timestamp, parsed.source);
+                        }
+                    } catch (e) {
+                        console.error('Lỗi đọc dữ liệu đã lưu:', e);
+                        showNotification('Dữ liệu lưu bị lỗi.', 'error');
+                    }
+                } else {
+                    showNotification('Chưa có kết quả tìm kiếm nào.', 'info');
+                }
             });
 
             this.updateButtonState('khoangmach');
@@ -6087,6 +6244,23 @@
         }
 
         async getUsersInMine(mineId) {
+            let securityToken = null;
+
+            // Cách 1: Lấy từ unsafeWindow (Biến thật của trang web)
+            if (typeof unsafeWindow !== 'undefined' && unsafeWindow.hh3dData && unsafeWindow.hh3dData.securityToken) {
+                securityToken = unsafeWindow.hh3dData.securityToken;
+            } 
+            // Cách 2: Lấy từ window thường
+            else if (typeof hh3dData !== 'undefined' && hh3dData.securityToken) {
+                securityToken = hh3dData.securityToken;
+            }
+
+            // Cách 3: Nếu vẫn null -> Gọi hàm quét (Fallback cuối cùng)
+            if (!securityToken) {
+                console.log(`${this.logPrefix} ⚠️ Token biến global bị thiếu, đang fetch lại...`);
+                // Gọi hàm getSecurityToken chúng ta đã viết ở trên
+                securityToken = await getSecurityToken(this.khoangMachUrl || window.location.href);
+            }
             if (!this.nonceGetUserInMine || !securityToken) {
                 let errorMsg = 'Lỗi (get_users):';
                 if (!this.nonceGetUserInMine) errorMsg += " Nonce (security) chưa được cung cấp.";
@@ -6304,10 +6478,6 @@
         } else {
             console.warn('[HH3D] ⚠️ Không thể lấy ID tài khoản.');
         }
-    const securityToken = await getSecurityToken();
-    if (!securityToken) {
-        showNotification('[HH3D] ⚠️ Không thể lấy security token.', 'error');
-    }
     const vandap = new VanDap();
     const dothach = new DoThach();
     const hoangvuc = new HoangVuc();
