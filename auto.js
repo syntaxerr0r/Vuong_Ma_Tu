@@ -18,7 +18,7 @@
     // ===============================================
     // HÀM TIỆN ÍCH CHUNG
     // ===============================================
-    const weburl = 'https://hoathinh3d.gg/';
+    const weburl = 'https://hoathinh3d.li/';
     const ajaxUrl = weburl + 'wp-content/themes/halimmovies-child/hh3d-ajax.php';
     let questionDataCache = null;
     const QUESTION_DATA_URL = 'https://raw.githubusercontent.com/syntaxerr0r/Vuong_Ma_Tu/refs/heads/main/vandap.json';
