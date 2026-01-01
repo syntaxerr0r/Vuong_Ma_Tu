@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey
-// @version       5.1
+// @version       5.1.1
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.li/*
@@ -120,6 +120,7 @@
      */
     async function getSecurityToken(url) {
         const logPrefix = "[SecurityTokenFetcher]";
+        console.log(`${logPrefix} ▶️ Bắt đầu lấy security token từ ${url || 'trang hiện tại'}...`);
         let htmlContent = null;
 
         try {
@@ -138,44 +139,53 @@
 
             if (match && match[1]) {
                 const token = match[1];
-                
-                // ============================================================
-                // 🔥 SỬA LỖI: CẬP NHẬT XUYÊN SANDBOX
-                // ============================================================
 
-                // Cách 1: Dùng unsafeWindow (Cách chuẩn của Tampermonkey)
-                // Đây là biến trỏ thẳng vào window thật của trang web
-                if (typeof unsafeWindow !== 'undefined' && unsafeWindow.hh3dData) {
-                    unsafeWindow.hh3dData.securityToken = token;
-                    console.log(`${logPrefix} 🔓 Đã cập nhật hh3dData thông qua unsafeWindow.`);
-                } 
-                // Cách 2: Fallback nếu không có unsafeWindow (Dùng window thường)
-                else if (typeof window.hh3dData !== 'undefined') {
-                    window.hh3dData.securityToken = token;
-                    console.log(`${logPrefix} ⚠️ Đã cập nhật hh3dData qua window thường (Có thể bị chặn bởi Sandbox).`);
+                // 🔥 LOGIC MỚI: Kiểm tra xem URL yêu cầu có phải là trang hiện tại không
+                // Nếu không truyền URL (!url) -> Mặc định là trang hiện tại
+                // Nếu có URL -> Phải trùng khớp tuyệt đối với window.location.href
+                const isCurrentPage = !url || (url === window.location.href);
+
+                if (isCurrentPage) {
+                    console.log(`${logPrefix} 🎯 URL trùng khớp trang hiện tại. Tiến hành cập nhật Global State...`);
+
+                    // ============================================================
+                    // 🔥 SỬA LỖI: CẬP NHẬT XUYÊN SANDBOX
+                    // ============================================================
+
+                    // Cách 1: Dùng unsafeWindow (Cách chuẩn của Tampermonkey)
+                    if (typeof unsafeWindow !== 'undefined' && unsafeWindow.hh3dData) {
+                        unsafeWindow.hh3dData.securityToken = token;
+                        console.log(`${logPrefix} 🔓 Đã cập nhật hh3dData thông qua unsafeWindow.`);
+                    }
+                    // Cách 2: Fallback nếu không có unsafeWindow
+                    else if (typeof window.hh3dData !== 'undefined') {
+                        window.hh3dData.securityToken = token;
+                        console.log(`${logPrefix} ⚠️ Đã cập nhật hh3dData qua window thường.`);
+                    }
+
+                    // Cách 3: "Tiêm thuốc" trực tiếp
+                    try {
+                        const script = document.createElement('script');
+                        script.textContent = `
+                            try {
+                                if (typeof hh3dData !== 'undefined') {
+                                    hh3dData.securityToken = "${token}";
+                                    console.log('✅ [Inject] Token đã được cập nhật từ bên trong trang web.');
+                                }
+                            } catch(e) {}
+                        `;
+                        (document.head || document.body || document.documentElement).appendChild(script);
+                        script.remove();
+                    } catch (injectErr) {
+                        console.warn(`${logPrefix} Lỗi tiêm script:`, injectErr);
+                    }
+                    // ============================================================
+                } else {
+                    //  - Token chỉ được trả về cho hàm gọi, không ảnh hưởng trang hiện tại
+                    console.log(`${logPrefix} 🛑 Token lấy từ URL khác (${url}). KHÔNG cập nhật hh3dData của trang này.`);
                 }
 
-                // Cách 3: "Tiêm thuốc" trực tiếp (Mạnh nhất - Chắc chắn 100%)
-                // Tạo một thẻ script nhỏ, nhúng vào trang để nó tự chạy lệnh update chính nó
-                try {
-                    const script = document.createElement('script');
-                    script.textContent = `
-                        try {
-                            if (typeof hh3dData !== 'undefined') {
-                                hh3dData.securityToken = "${token}";
-                                console.log('✅ [Inject] Token đã được cập nhật từ bên trong trang web.');
-                            }
-                        } catch(e) {}
-                    `;
-                    (document.head || document.body || document.documentElement).appendChild(script);
-                    script.remove(); // Chạy xong xóa luôn dấu vết
-                } catch (injectErr) {
-                    console.warn(`${logPrefix} Lỗi tiêm script:`, injectErr);
-                }
-                
-                // ============================================================
-
-                return token; 
+                return token;
             }
             return null;
 
