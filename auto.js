@@ -6291,7 +6291,7 @@
         }
 
         async getTuVi(userId) {
-            // 1. Kiểm tra và lấy Nonce nếu chưa có
+            // 0. Chuẩn bị Nonce & Headers
             if (!this.nonce) {
                 this.nonce = await this.getNonce();
             }
@@ -6302,24 +6302,50 @@
                 "Content-Type": "application/json",
                 "X-WP-Nonce": nonce
             };
+            const targetId = String(userId);
 
-            let tuVi = null;
-
+            // ============================================================
+            // 🟢 CÁCH 1: LOGIC CŨ (GIỮ NGUYÊN BẢN GỐC)
+            // ============================================================
             try {
-                // --- BƯỚC 1: FOLLOW USER ---
-                // endpoint: /follow
-                // body: { followed_user_id: "ID" }
-                await fetch(`${weburl}/wp-json/luan-vo/v1/follow`, {
+                const res = await fetch(`${weburl}/wp-json/luan-vo/v1/search-users`, {
                     method: "POST",
                     headers: headers,
-                    body: JSON.stringify({ followed_user_id: String(userId) }),
+                    body: JSON.stringify({ query: targetId, page: 1 }),
                     credentials: "include",
                     mode: "cors"
                 });
 
-                // --- BƯỚC 2: LẤY DANH SÁCH FOLLOWING ---
-                // endpoint: /get-following-users
-                // body: { page: 1 }
+                // Logic gốc: Lấy user đầu tiên trong danh sách (users[0])
+                const points = res.ok ? (await res.json())?.data?.users?.[0]?.points ?? null : null;
+                
+                // Nếu tìm thấy điểm -> Trả về luôn
+                if (points !== null && points !== undefined) {
+                    return points;
+                }
+            } catch (e) {
+                // Lỗi ở cách 1 -> Bỏ qua để chạy xuống cách 2
+            }
+
+            // ============================================================
+            // 🔴 CÁCH 2: FALLBACK (FOLLOW -> SCAN -> UNFOLLOW)
+            // Chỉ chạy khi Cách 1 trả về null hoặc lỗi
+            // ============================================================
+            // console.log(`[GetTuVi] Cách 1 thất bại, đang dùng Fallback cho ID ${targetId}...`);
+            
+            let tuVi = null;
+
+            try {
+                // B2.1: Follow
+                await fetch(`${weburl}/wp-json/luan-vo/v1/follow`, {
+                    method: "POST",
+                    headers: headers,
+                    body: JSON.stringify({ followed_user_id: targetId }),
+                    credentials: "include",
+                    mode: "cors"
+                });
+
+                // B2.2: Lấy danh sách Following
                 const resList = await fetch(`${weburl}/wp-json/luan-vo/v1/get-following-users`, {
                     method: "POST",
                     headers: headers,
@@ -6329,39 +6355,29 @@
                 });
 
                 if (resList.ok) {
-                    const jsonResponse = await resList.json();
-                    
-                    if (jsonResponse.success && jsonResponse.data && Array.isArray(jsonResponse.data.users)) {
-                        
-                        // Tìm user có id trùng khớp trong mảng users
-                        // Ép kiểu String để đảm bảo so sánh đúng (ví dụ 28003 == "28003")
-                        const targetUser = jsonResponse.data.users.find(u => String(u.id) === String(userId));
-                        
+                    const jsonList = await resList.json();
+                    if (jsonList.success && jsonList.data && Array.isArray(jsonList.data.users)) {
+                        // Ở danh sách follow thì phải tìm chính xác ID kẻo lấy nhầm người khác
+                        const targetUser = jsonList.data.users.find(u => String(u.id) === targetId);
                         if (targetUser) {
-                            tuVi = targetUser.points; // Lấy giá trị points
-                            console.log(`[GetTuVi] Đã tìm thấy ID ${userId}: ${tuVi} Tu Vi`);
+                            tuVi = targetUser.points;
                         }
                     }
                 }
 
             } catch (e) {
-                console.error(`Lỗi khi lấy tu vi (Logic Follow):`, e);
+                console.error(`[GetTuVi] Fallback lỗi:`, e);
             } finally {
-                // --- BƯỚC 3: UNFOLLOW USER (Dọn dẹp) ---
-                // endpoint: /unfollow
-                // body: { unfollow_user_id: "ID" }
-                // Luôn chạy bước này để không làm rác danh sách theo dõi
+                // B2.3: Unfollow (Luôn chạy để dọn rác)
                 try {
                     await fetch(`${weburl}/wp-json/luan-vo/v1/unfollow`, {
                         method: "POST",
                         headers: headers,
-                        body: JSON.stringify({ unfollow_user_id: String(userId) }),
+                        body: JSON.stringify({ unfollow_user_id: targetId }),
                         credentials: "include",
                         mode: "cors"
                     });
-                } catch (errUnfollow) {
-                    console.error(`Lỗi khi unfollow user ${userId}:`, errUnfollow);
-                }
+                } catch (ignore) {}
             }
 
             return tuVi;
