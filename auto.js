@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey
-// @version       5.2.4
+// @version       5.2.5
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.li/*
@@ -6213,16 +6213,18 @@
 
             // Cách 1: Lấy từ unsafeWindow (Biến thật của trang web)
             if (typeof unsafeWindow !== 'undefined' && unsafeWindow.hh3dData && unsafeWindow.hh3dData.securityToken) {
+                showNotification(`${this.logPrefix} ℹ️ Lấy 'security_token' từ unsafeWindow.`, 'info');
                 securityToken = unsafeWindow.hh3dData.securityToken;
             } 
             // Cách 2: Lấy từ window thường
             else if (typeof hh3dData !== 'undefined' && hh3dData.securityToken) {
+                showNotification(`${this.logPrefix} ℹ️ Lấy 'security_token' từ biến global thông thường.`, 'info');
                 securityToken = hh3dData.securityToken;
             }
 
             // Cách 3: Nếu vẫn null -> Gọi hàm quét (Fallback cuối cùng)
             if (!securityToken) {
-                console.log(`${this.logPrefix} ⚠️ Token biến global bị thiếu, đang fetch lại...`);
+                showNotification(`${this.logPrefix} ⚠️ Token biến global bị thiếu, đang fetch lại...`);
                 // Gọi hàm getSecurityToken chúng ta đã viết ở trên
                 securityToken = await getSecurityToken(this.khoangMachUrl || window.location.href);
             }
