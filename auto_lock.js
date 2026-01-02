@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey
-// @version       5.2.1
+// @version       5.2.2
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.li/*
@@ -863,12 +863,11 @@
         constructor() {
             this.ajaxUrl = ajaxUrl;
             this.webUrl = weburl;
-            this.getSecurityNonce = getSecurityNonce;
             this.doThachUrl = this.webUrl + 'do-thach-hh3d?t';
         }
 
         // --- Các phương thức private để gọi API và lấy nonce ---
-
+        /*
         async #getLoadDataNonce() {
             return this.getSecurityNonce(this.doThachUrl, /action: 'load_do_thach_data',[\s\S]*?security: '([a-f0-9]+)'/);
         }
@@ -886,10 +885,10 @@
          * @param {string} securityNonce - Nonce cho yêu cầu.
          * @returns {Promise<object|null>} Dữ liệu phiên hoặc null nếu có lỗi.
          */
-        async #getDiceRollInfo(securityNonce) {
+        async #getDiceRollInfo() {
             console.log('[HH3D Đổ Thạch] ▶️ Đang lấy thông tin phiên...');
             const securityToken = await getSecurityToken(this.doThachUrl);
-            const payload = new URLSearchParams({ action: 'load_do_thach_data', security_token: securityToken, security: securityNonce });
+            const payload = new URLSearchParams({ action: 'load_do_thach_data', security_token: securityToken });
             const headers = {
                 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
                 'X-Requested-With': 'XMLHttpRequest',
@@ -914,16 +913,14 @@
          * Đặt cược vào một viên đá cụ thể.
          * @param {object} stone - Đối tượng đá để đặt cược.
          * @param {number} betAmount - Số tiền cược.
-         * @param {string} placeBetSecurity - Nonce để đặt cược.
          * @returns {Promise<boolean>} True nếu đặt cược thành công.
          */
-        async #placeBet(stone, betAmount, placeBetSecurity) {
+        async #placeBet(stone, betAmount) {
             console.log(`[HH3D Đặt Cược] 🪙 Đang cược ${betAmount} Tiên Ngọc vào ${stone.name}...`);
             const securityToken = await getSecurityToken(this.doThachUrl);
             const payload = new URLSearchParams({
                 action: 'place_do_thach_bet',
                 security_token: securityToken,
-                security: placeBetSecurity,
                 stone_id: stone.stone_id,
                 bet_amount: betAmount
             });
@@ -946,7 +943,7 @@
                     if (!this._alreadyClaimedReward) {
                         if (await this.#claimReward()) {
                             this._alreadyClaimedReward = true;
-                            return await this.#placeBet(stone, betAmount, placeBetSecurity);
+                            return await this.#placeBet(stone, betAmount);
                         } else {
                             showNotification(`❌ Không thể nhận thưởng kỳ trước, vui lòng thử lại.`, 'error');
                         }
@@ -974,13 +971,8 @@
          */
         async #claimReward() {
             console.log('[HH3D Nhận Thưởng] 🎁 Đang nhận thưởng...');
-            const securityNonce = await this.#getClaimRewardNonce();
-            if (!securityNonce) {
-                showNotification('Lỗi khi lấy nonce để nhận thưởng.', 'error');
-                return false;
-            }
             const securityToken = await getSecurityToken(this.doThachUrl);
-            const payload = new URLSearchParams({ action: 'claim_do_thach_reward', security_token: securityToken, security: securityNonce });
+            const payload = new URLSearchParams({ action: 'claim_do_thach_reward', security_token: securityToken});
             const headers = {
                 'Accept': 'application/json, text/javascript, */*; q=0.01',
                 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
@@ -1015,12 +1007,7 @@
             console.log(`[HH3D Đổ Thạch] 🧠 Bắt đầu quy trình với chiến lược: ${stoneType}...`);
 
             // Bước 1: Lấy thông tin phiên
-            const securityNonce = await this.#getLoadDataNonce();
-            if (!securityNonce) {
-                showNotification('Lỗi khi lấy nonce để tải dữ liệu.', 'error');
-                return;
-            }
-            const sessionData = await this.#getDiceRollInfo(securityNonce);
+            const sessionData = await this.#getDiceRollInfo();
 
             if (!sessionData) {
                 console.error('[HH3D Đổ Thạch] ❌ Không thể lấy dữ liệu phiên, dừng lại.');
@@ -1087,15 +1074,9 @@
                 return;
             }
 
-            const placeBetSecurity = await this.#getPlaceBetNonce();
-            if (!placeBetSecurity) {
-                showNotification('Lỗi khi lấy nonce để đặt cược.', 'error');
-                return;
-            }
-
             let successfulBets = 0;
             for (const stone of stonesToBet) {
-                const success = await this.#placeBet(stone, betAmount, placeBetSecurity);
+                const success = await this.#placeBet(stone, betAmount);
                 if (success) {
                     successfulBets++;
                 }
@@ -6522,7 +6503,7 @@
             mainObserver.observe(document.body, { childList: true, subtree: true });
         }
     }
-    // ===============================================
+     // ===============================================
     // Bộ lọc tông môn
     // ===============================================
     async function getDivContent(url, selector) {
