@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey
-// @version       5.2.2
+// @version       5.2.3
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.li/*
@@ -3481,6 +3481,7 @@
                 return false;
             }
             const spinURL = weburl + "wp-json/lottery/v1/spin";
+            const securityToken = await getSecurityToken(weburl + 'vong-quay-phuc-van?t');
             let remainingSpins = 4;
             do {
                 try {
@@ -3490,6 +3491,7 @@
                             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:142.0) Gecko/20100101 Firefox/142.0",
                             "Accept": "*/*",
                             "Accept-Language": "vi,en-US;q=0.5",
+                            "X-Security-Token": securityToken,
                             "X-WP-Nonce": nonce,
                             "Content-Type": "application/json",
                         },
