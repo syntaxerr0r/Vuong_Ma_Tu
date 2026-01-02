@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey
-// @version       5.2
+// @version       5.2.1
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.li/*
@@ -559,9 +559,10 @@
          * Tìm câu trả lời đúng cho một câu hỏi và gửi nó đi.
          * @param {object} question Đối tượng câu hỏi từ máy chủ.
          * @param {object} headers Headers của yêu cầu để gửi đi.
+         * @param {string} securityToken Token bảo mật để xác thực yêu cầu.
          * @returns {Promise<boolean>} True nếu câu trả lời được gửi thành công, ngược lại là false.
          */
-        async checkAnswerAndSubmit(question, headers) {
+        async checkAnswerAndSubmit(question, headers, securityToken) {
             // 1. Định nghĩa các hàm helper (như logic Đua Top)
             // Normalize: Xóa hết ký tự đặc biệt và khoảng trắng để so sánh tuyệt đối
             const normalize = (str) => str ? str.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?\s]/g, '') : '';
@@ -623,11 +624,14 @@
                 return false;
             }
 
+            //const securityToken = await getSecurityToken(weburl + 'van-dap-tong-mon?t');
             // 4. Gửi câu trả lời
             const payloadSubmitAnswer = new URLSearchParams();
             payloadSubmitAnswer.append('action', 'save_quiz_result');
-            payloadSubmitAnswer.append('question_id', question.id);
+            payloadSubmitAnswer.append('security_token', securityToken);
             payloadSubmitAnswer.append('answer', answerIndex);
+            payloadSubmitAnswer.append('question_id', question.id);
+            
 
             try {
                 const responseSubmit = await fetch(this.ajaxUrl, {
@@ -715,7 +719,7 @@
 
                     let newAnswersFound = false;
                     for (const question of questionsToAnswer) {
-                        const isAnsweredSuccessfully = await this.checkAnswerAndSubmit(question, headers);
+                        const isAnsweredSuccessfully = await this.checkAnswerAndSubmit(question, headers, securityToken);
                         if (isAnsweredSuccessfully) {
                             answeredThisSession++;
                             newAnswersFound = true;
@@ -1110,18 +1114,13 @@
     async function doThiLuyenTongMon() {
         console.log('[HH3D Thí Luyện Tông Môn] ▶️ Bắt đầu Thí Luyện Tông Môn');
 
-        // Bước 1: Lấy security nonce.
-        const securityNonce = await getSecurityNonce(weburl + 'thi-luyen-tong-mon-hh3d?t', /action: 'open_chest_tltm',[\s\S]*?security: '([a-f0-9]+)'/);
-        if (!securityNonce) {
-            showNotification('Lỗi khi lấy security nonce cho Thí Luyện Tông Môn.', 'error');
-            throw new Error('Lỗi khi lấy security nonce cho Thí Luyện Tông Môn.');
-        }
+        // Bước 1: Lấy security
         const securityToken = await getSecurityToken(weburl + 'thi-luyen-tong-mon-hh3d?t');
         const url = ajaxUrl;
         const payload = new URLSearchParams();
         payload.append('action', 'open_chest_tltm');
         payload.append('security_token', securityToken);
-        payload.append('security', securityNonce);
+        
 
         const headers = {
             'Accept': 'application/json, text/javascript, */*; q=0.01',
@@ -1155,7 +1154,6 @@
             const timePayload = new URLSearchParams();
                 timePayload.append('action', 'get_remaining_time_tltm');
                 timePayload.append('security_token', securityToken);
-                timePayload.append('security', securityNonce);
             const timeResponse = await fetch(url, {
                 method: 'POST',
                 headers: headers,
@@ -1180,14 +1178,6 @@
     // ===============================================
     async function doPhucLoiDuong() {
         console.log('[HH3D Phúc Lợi Đường] ▶️ Bắt đầu nhiệm vụ Phúc Lợi Đường.');
-
-        // Bước 1: Lấy security nonce từ trang Phúc Lợi Đường
-        const securityNonce = await getSecurityNonce(weburl + 'phuc-loi-duong?t', /action: 'get_next_time_pl',[\s\S]*?security: '([a-f0-9]+)'/);
-        if (!securityNonce) {
-            showNotification('Lỗi khi lấy security nonce cho Phúc Lợi Đường.', 'error');
-            return;
-        }
-
         const url = ajaxUrl;
         const headers = {
             'Accept': 'application/json, text/javascript, */*; q=0.01',
@@ -1195,13 +1185,12 @@
             'X-Requested-With': 'XMLHttpRequest',
         };
 
-        // Bước 2: Lấy thông tin thời gian còn lại và cấp độ rương
+        // Bước 1: Lấy thông tin thời gian còn lại và cấp độ rương
         console.log('[HH3D Phúc Lợi Đường] ⏲️ Đang kiểm tra thời gian mở rương...');
         const securityToken = await getSecurityToken(weburl + 'phuc-loi-duong?t');
         const payloadTime = new URLSearchParams();
         payloadTime.append('action', 'get_next_time_pl');
         payloadTime.append('security_token', securityToken);
-        payloadTime.append('security', securityNonce);
 
         try {
             const responseTime = await fetch(url, {
@@ -1229,7 +1218,6 @@
                     const payloadOpen = new URLSearchParams();
                     payloadOpen.append('action', 'open_chest_pl');
                     payloadOpen.append('security_token', securityToken);
-                    payloadOpen.append('security', securityNonce);
                     payloadOpen.append('chest_id', chest_level + 1);
 
                     const responseOpen = await fetch(url, {
@@ -1274,16 +1262,14 @@
         const startOfTomorrow = new Date(startOfToday);
         startOfTomorrow.setDate(startOfTomorrow.getDate() + 1);
         const startOfLastTwoDays = new Date(tzNow.getFullYear(), tzNow.getMonth() + 1, 0); // 00:00 last day
-        startOfLastTwoDays.setDate(startOfLastTwoDays.getDate() - 30); // lùi về 00:00 ngày kế cuối
+        startOfLastTwoDays.setDate(startOfLastTwoDays.getDate() - 1); // lùi về 00:00 ngày kế cuối
 
         if (startOfToday >= startOfLastTwoDays && tzNow < startOfTomorrow) {
             console.log('[HH3D Phúc Lợi Đường] 🎉 Đang nhận thưởng cuối tháng...');
-            const securityNonceMonthly = await getSecurityNonce(weburl + 'phuc-loi-duong?t', /action: 'claim_bonus_reward',[\s\S]*?security: '([a-f0-9]+)'/);
             for (let i = 1; i <= 4; i++) {
                 const payloadBonus = new URLSearchParams();
                 payloadBonus.append('action', 'claim_bonus_reward');
                 payloadBonus.append('chest_id', i);
-                payloadBonus.append('security', securityNonceMonthly);
                 try {
                     const responseBonus = await fetch(url, {
                         method: 'POST',
