@@ -155,17 +155,16 @@
                     // Cách 1: Dùng unsafeWindow (Cách chuẩn của Tampermonkey)
                     if (typeof unsafeWindow !== 'undefined' && unsafeWindow.hh3dData) {
                         unsafeWindow.hh3dData.securityToken = token;
-                        showNotification(`${logPrefix} 🔓 Đã cập nhật hh3dData thông qua unsafeWindow.`);
+                        console.log(`${logPrefix} 🔓 Đã cập nhật hh3dData thông qua unsafeWindow.`);
                     }
                     // Cách 2: Fallback nếu không có unsafeWindow
                     else if (typeof window.hh3dData !== 'undefined') {
                         window.hh3dData.securityToken = token;
-                        showNotification(`${logPrefix} ⚠️ Đã cập nhật hh3dData qua window thường.`);
+                        console.log(`${logPrefix} ⚠️ Đã cập nhật hh3dData qua window thường.`);
                     } else {
-
                         // Cách 3: "Tiêm thuốc" trực tiếp
                         try {
-                            showNotification(`${logPrefix} 💉 Tiêm script cập nhật token trực tiếp vào trang...`, 'info');
+                            console.log(`${logPrefix} 💉 Tiêm script cập nhật token trực tiếp vào trang...`);
                             const script = document.createElement('script');
                             script.textContent = `
                                 try {
