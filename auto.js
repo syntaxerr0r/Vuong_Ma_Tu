@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey
-// @version       5.2.6
+// @version       5.2.7
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.li/*
@@ -140,10 +140,10 @@
             if (match && match[1]) {
                 const token = match[1];
 
-                // 🔥 LOGIC MỚI: Kiểm tra xem URL yêu cầu có phải là trang hiện tại không
+                // 🔥 LOGIC MỚI: Kiểm tra xem URL yêu cầu có phải là trang hiện tại không, bằng cách kiểm tra trang hiện tại có bao gồm không
                 // Nếu không truyền URL (!url) -> Mặc định là trang hiện tại
-                // Nếu có URL -> Phải trùng khớp tuyệt đối với window.location.href
-                const isCurrentPage = !url || (url === window.location.href);
+                // Nếu có URL -> Phải trùng khớp với window.location.href
+                const isCurrentPage = !url || (window.location.href.includes(url));
 
                 if (isCurrentPage) {
                     console.log(`${logPrefix} 🎯 URL trùng khớp trang hiện tại. Tiến hành cập nhật Global State...`);
@@ -161,24 +161,25 @@
                     else if (typeof window.hh3dData !== 'undefined') {
                         window.hh3dData.securityToken = token;
                         showNotification(`${logPrefix} ⚠️ Đã cập nhật hh3dData qua window thường.`);
-                    }
+                    } else {
 
-                    // Cách 3: "Tiêm thuốc" trực tiếp
-                    try {
-                        showNotification(`${logPrefix} 💉 Tiêm script cập nhật token trực tiếp vào trang...`, 'info');
-                        const script = document.createElement('script');
-                        script.textContent = `
-                            try {
-                                if (typeof hh3dData !== 'undefined') {
-                                    hh3dData.securityToken = "${token}";
-                                    console.log('✅ [Inject] Token đã được cập nhật từ bên trong trang web.');
-                                }
-                            } catch(e) {}
-                        `;
-                        (document.head || document.body || document.documentElement).appendChild(script);
-                        script.remove();
-                    } catch (injectErr) {
-                        console.warn(`${logPrefix} Lỗi tiêm script:`, injectErr);
+                        // Cách 3: "Tiêm thuốc" trực tiếp
+                        try {
+                            showNotification(`${logPrefix} 💉 Tiêm script cập nhật token trực tiếp vào trang...`, 'info');
+                            const script = document.createElement('script');
+                            script.textContent = `
+                                try {
+                                    if (typeof hh3dData !== 'undefined') {
+                                        hh3dData.securityToken = "${token}";
+                                        console.log('✅ [Inject] Token đã được cập nhật từ bên trong trang web.');
+                                    }
+                                } catch(e) {}
+                            `;
+                            (document.head || document.body || document.documentElement).appendChild(script);
+                            script.remove();
+                        } catch (injectErr) {
+                            console.warn(`${logPrefix} Lỗi tiêm script:`, injectErr);
+                        }
                     }
                     // ============================================================
                 } else {
@@ -1346,7 +1347,7 @@
                         await new Promise(resolve => setTimeout(resolve, 1000));
                         const rewardResponse = await this.sendApiRequest('wp-json/tong-mon/v1/claim-boss-reward', 'POST', nonce, {});
                         if (rewardResponse && rewardResponse.success) {
-                            showNotification(rewardResponse.message, 'success');
+                            showNotification(rewardResponse.message, 'success', 10000);
                         }
                     }
                     console.log(`${this.logPrefix} ✅ Có thể tấn công.`);
@@ -1357,7 +1358,7 @@
                     await new Promise(resolve => setTimeout(resolve, 1000));
                     const rewardResponse = await this.sendApiRequest('wp-json/tong-mon/v1/claim-boss-reward', 'POST', nonce, {});
                     if (rewardResponse && rewardResponse.success) {
-                        showNotification(rewardResponse.message, 'success')
+                        showNotification(rewardResponse.message, 'success', 10000);
                     };
                     const contributionResponse = await this.sendApiRequest('wp-json/tong-mon/v1/contribute-boss', 'POST', nonce, {});
                     if (contributionResponse) {
@@ -6211,24 +6212,18 @@
 
         async getUsersInMine(mineId) {
             let securityToken = null;
-
             // Cách 1: Lấy từ unsafeWindow (Biến thật của trang web)
             if (typeof unsafeWindow !== 'undefined' && unsafeWindow.hh3dData && unsafeWindow.hh3dData.securityToken) {
-                showNotification(`${this.logPrefix} ℹ️ Lấy 'security_token' từ unsafeWindow.`, 'info');
+                console.log(`${this.logPrefix} ℹ️ Lấy 'security_token' từ unsafeWindow.`, 'info');
                 securityToken = unsafeWindow.hh3dData.securityToken;
             } 
             // Cách 2: Lấy từ window thường
             else if (typeof hh3dData !== 'undefined' && hh3dData.securityToken) {
-                showNotification(`${this.logPrefix} ℹ️ Lấy 'security_token' từ biến global thông thường.`, 'info');
+                console.log(`${this.logPrefix} ℹ️ Lấy 'security_token' từ biến global thông thường.`, 'info');
                 securityToken = hh3dData.securityToken;
             }
+            
 
-            // Cách 3: Nếu vẫn null -> Gọi hàm quét (Fallback cuối cùng)
-            if (!securityToken) {
-                showNotification(`${this.logPrefix} ⚠️ Token biến global bị thiếu, đang fetch lại...`);
-                // Gọi hàm getSecurityToken chúng ta đã viết ở trên
-                securityToken = await getSecurityToken(this.khoangMachUrl || window.location.href);
-            }
             if (!this.nonceGetUserInMine || !securityToken) {
                 let errorMsg = 'Lỗi (get_users):';
                 if (!this.nonceGetUserInMine) errorMsg += " Nonce (security) chưa được cung cấp.";
