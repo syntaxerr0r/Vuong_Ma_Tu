@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey
-// @version       5.2.5
+// @version       5.2.6
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.li/*
@@ -155,16 +155,17 @@
                     // Cách 1: Dùng unsafeWindow (Cách chuẩn của Tampermonkey)
                     if (typeof unsafeWindow !== 'undefined' && unsafeWindow.hh3dData) {
                         unsafeWindow.hh3dData.securityToken = token;
-                        console.log(`${logPrefix} 🔓 Đã cập nhật hh3dData thông qua unsafeWindow.`);
+                        showNotification(`${logPrefix} 🔓 Đã cập nhật hh3dData thông qua unsafeWindow.`);
                     }
                     // Cách 2: Fallback nếu không có unsafeWindow
                     else if (typeof window.hh3dData !== 'undefined') {
                         window.hh3dData.securityToken = token;
-                        console.log(`${logPrefix} ⚠️ Đã cập nhật hh3dData qua window thường.`);
+                        showNotification(`${logPrefix} ⚠️ Đã cập nhật hh3dData qua window thường.`);
                     }
 
                     // Cách 3: "Tiêm thuốc" trực tiếp
                     try {
+                        showNotification(`${logPrefix} 💉 Tiêm script cập nhật token trực tiếp vào trang...`, 'info');
                         const script = document.createElement('script');
                         script.textContent = `
                             try {
