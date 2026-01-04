@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey
-// @version       5.3.4
+// @version       5.3.5
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.li/*
@@ -6785,7 +6785,7 @@
         }
 
         async showTotalEnemies(mineId) {
-            const data = await khoangmach.getUsersInMine(mineId);
+            const data = await getUsersInMine(mineId);
             const currentMineUsers = data && data.users ? data.users : [];
             let totalEnemies = 0;
             let totalLienMinh = 0;
