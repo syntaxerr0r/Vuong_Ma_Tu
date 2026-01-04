@@ -2958,7 +2958,7 @@
                 console.log(`${this.logPrefix} 🕵️ Bắt đầu quét toàn bộ mỏ (Mode: Raw Data)...`);
 
                 // Nếu có UI truyền xuống, báo cáo ngay
-                if (onProgress) onProgress(0, 'Đang chuẩn bị dữ liệu...');
+                if (onProgress) onProgress(0, 'Đang chuẩn bị...');
 
                 // --- BƯỚC 1: LẤY DANH SÁCH MỎ & LỌC ---
                 const allMines = await this.getAllMines();
