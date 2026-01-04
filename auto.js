@@ -6627,7 +6627,7 @@
                 showNotification(errorMsg, 'error');
                 return null;
             }
-
+            showNotification(`[Hiện Tu vi] ℹ️ security_token: ${securityToken}, nonce ${this.nonceGetUserInMine}`, 'info');
             const payload = new URLSearchParams({
                 action: 'get_users_in_mine',
                 mine_id: mineId,
