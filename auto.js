@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey
-// @version       5.3.8
+// @version       5.3.9
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.li/*
@@ -6825,8 +6825,9 @@
             };
         }
 
-        async showTotalEnemies(mineId) {
-            const data = await khoangmach.getUsersInMine(mineId);
+        async showTotalEnemies(mineId, usersData = null) {
+            // Nếu đã có data thì dùng luôn, không cần gọi API lại
+            const data = usersData || await khoangmach.getUsersInMine(mineId);
             const currentMineUsers = data && data.users ? data.users : [];
             let totalEnemies = 0;
             let totalLienMinh = 0;
@@ -6919,8 +6920,10 @@
             const mineId = buttons[0]?.getAttribute('data-mine-id');
             
             // Sắp xếp lại thứ tự hiển thị: Kẻ địch lên đầu (trừ chủ mỏ và bản thân)
+            // Gọi API một lần và tái sử dụng cho cả rearrange và showTotalEnemies
+            let usersData = null;
             if (mineId && !document.body.dataset.rearranged) {
-                await this.rearrangeUsersByEnemy(mineId);
+                usersData = await this.rearrangeUsersByEnemy(mineId);
                 document.body.dataset.rearranged = mineId; // Đánh dấu đã sắp xếp cho mỏ này
             }
 
@@ -6949,7 +6952,7 @@
 
                 if (mineId && mineId !== this.currentMineId) {
                     this.currentMineId = mineId;
-                    this.showTotalEnemies(mineId);
+                    this.showTotalEnemies(mineId, usersData); // Tái sử dụng usersData đã lấy
                     this.addEventListenersToReloadBtn(mineId);
                 }
                 // nghỉ 1s tránh spam
@@ -6960,12 +6963,14 @@
         /**
          * Sắp xếp lại các user trong mỏ: đưa kẻ địch lên đầu (trừ chủ mỏ vị trí 0 và bản thân)
          * @param {string} mineId - ID của mỏ
+         * @param {object} usersData - (Tùy chọn) Dữ liệu users đã lấy sẵn, tránh gọi API lại
+         * @returns {object|null} Trả về data users để tái sử dụng
          */
-        async rearrangeUsersByEnemy(mineId) {
+        async rearrangeUsersByEnemy(mineId, usersData = null) {
             try {
-                // Lấy dữ liệu users từ API
-                const data = await this.getUsersInMine(mineId);
-                if (!data || !data.users || data.users.length === 0) return;
+                // Nếu đã có data thì dùng luôn, không cần gọi API lại
+                const data = usersData || await khoangmach.getUsersInMine(mineId);
+                if (!data || !data.users || data.users.length === 0) return null;
 
                 const users = data.users;
                 
@@ -6975,7 +6980,7 @@
 
                 // Lấy container chứa các user (thường là parent của các attack-btn)
                 const buttons = document.querySelectorAll('.attack-btn');
-                if (buttons.length === 0) return;
+                if (buttons.length === 0) return data;
 
                 // Tìm container cha chung của các user items
                 const firstBtn = buttons[0];
@@ -6983,14 +6988,14 @@
                                    || firstBtn.closest('[class*="user"]')?.parentElement
                                    || firstBtn.parentElement?.parentElement;
                 
-                if (!userContainer) return;
+                if (!userContainer) return data;
 
                 // Lấy tất cả các user items (phần tử con trực tiếp chứa attack-btn)
                 const userItems = Array.from(userContainer.children).filter(el => 
                     el.querySelector('.attack-btn')
                 );
 
-                if (userItems.length <= 1) return;
+                if (userItems.length <= 1) return data;
 
                 // Lấy accountId của bản thân
                 const selfId = String(accountId);
@@ -7040,8 +7045,11 @@
 
                 console.log(`[Hiện Tu Vi] ✅ Đã sắp xếp lại: ${enemyItems.length} kẻ địch lên đầu`);
 
+                return data; // ✅ Trả về data để tái sử dụng
+
             } catch (e) {
                 console.error('[Hiện Tu Vi] ❌ Lỗi sắp xếp users:', e);
+                return null;
             }
         }
 
