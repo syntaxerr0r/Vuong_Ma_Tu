@@ -7011,7 +7011,7 @@
                 await new Promise(resolve => document.addEventListener('DOMContentLoaded', resolve, { once: true }));
             }
             this.nonceGetUserInMine = await this.getNonceGetUserInMine();
-            showNotification(`[Hiện Tu vi] ℹ️ Lấy 'nonce' cho get_users_in_mine: ${this.nonceGetUserInMine ? 'Thành công' : 'Thất bại'}`);
+            showNotification(`[Hiện Tu vi] ℹ️ Lấy 'nonce' cho get_users_in_mine: ${this.nonceGetUserInMine}`);
             this.nonce = await this.getNonce();
             await this.waitForElement('#head_manage_acc', 15000);
 
