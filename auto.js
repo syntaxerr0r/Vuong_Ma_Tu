@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey
-// @version       5.3.10
+// @version       5.4
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.li/*
@@ -2995,30 +2995,39 @@
                 minesData = minesData.map(m => ({
                     ...m,
                     users: (m.users || []).map(u => ({
-                        // Map key ngắn (i, n, t, r) -> key dài (id, name...)
+                        // Map key ngắn (i, n, t, r, d, l) -> key dài (id, name...)
                         id: u.i || u.id,                     
                         name: u.n || u.name,
                         tongMonName: u.t || u.tongMonName,
                         role: u.r || u.role,
+                        dong_mon: u.d === 1 || u.dong_mon,   // d = dong_mon
+                        lien_minh: u.l === 1 || u.lien_minh, // l = lien_minh
                         ...u 
                     }))
                 }));
             }
 
-            // 3. Lọc & Hiển thị (Giữ nguyên)
+            // 3. Lọc & Hiển thị
             const results = [];
             for (const mine of minesData) {
                 if (!mine.users) continue;
                 for (const u of mine.users) {
                     const uid = String(u.id ?? '').trim();
                     const uTong = String(u.tongMonName || '').trim();
-                    if (enemySet.has(uid) || tongNameSet.has(uTong)) {
+                    
+                    // ✅ Kiểm tra xem có phải kẻ địch theo ID hoặc Tông Môn
+                    const isTargetById = enemySet.has(uid);
+                    const isTargetByTong = tongNameSet.has(uTong);
+                    
+                    if (isTargetById || isTargetByTong) {
                         results.push({
                             ...u,
                             mineId: mine.id,
                             mineName: mine.name,
                             tongMonName: u.tongMonName,
-                            role: u.role
+                            role: u.role,
+                            dong_mon: u.dong_mon,      // Đảm bảo truyền xuống UI
+                            lien_minh: u.lien_minh     // Đảm bảo truyền xuống UI
                         });
                     }
                 }
@@ -3114,7 +3123,9 @@
                                     i: u.id,                                // i = id
                                     n: u.name,                              // n = name
                                     t: String(extra.tongMonName || '').trim(), // t = tongMon
-                                    r: extra.role                           // r = role
+                                    r: extra.role,                          // r = role
+                                    d: u.dong_mon ? 1 : 0,                  // d = dong_mon (1/0 để tiết kiệm dung lượng)
+                                    l: u.lien_minh ? 1 : 0                  // l = lien_minh
                                 };
                             });
 
@@ -3293,22 +3304,26 @@
                             </div>
                             
                             <div id="m-${mine.id}" class="mine-content" style="display: none; padding: 5px 10px; background: #151515; border-top: 1px solid #333;">
-                                ${mine.users.map(u => `
+                                ${mine.users.map(u => {
+                                    const isAlly = u.dong_mon || u.lien_minh;
+                                    const allyLabel = u.dong_mon ? '☯️ Đồng Môn' : (u.lien_minh ? '🤝 Liên Minh' : '');
+                                    const nameColor = isAlly ? '#4caf50' : '#ff6b6b'; // Xanh lá nếu là đồng minh
+                                    return `
                                     <div style="padding: 6px 0; border-bottom: 1px dashed #333; display: flex; justify-content: space-between; align-items: center;">
                                         <div style="flex: 1;">
-                                            <div style="color: #ff6b6b; font-weight: 500;">${esc(u.name)}</div>
+                                            <div style="color: ${nameColor}; font-weight: 500;">${esc(u.name)} ${allyLabel ? `<span style="font-size: 10px;">${allyLabel}</span>` : ''}</div>
                                             <div style="font-size: 11px; color: #777;">${esc(u.tongMonName || 'Vô phái')} - ${esc(u.role || 'Thành viên')}</div>
                                         </div>
                                         
                                         <div style="text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
-                                            <div style="display: flex; gap: 5px;">
-                                                <button class="btn-check-tuvi" data-uid="${u.id}" style="border:none; background: #039be5; color: white; border-radius: 3px; padding: 3px 8px; font-size: 11px; cursor: pointer; font-weight: bold;">👁</button>
+                                            ${isAlly ? '' : `<div style="display: flex; gap: 5px;">
+                                                <button class="btn-check-tuvi" data-uid="${u.id}" data-ally="${isAlly ? '1' : '0'}" style="border:none; background: #039be5; color: white; border-radius: 3px; padding: 3px 8px; font-size: 11px; cursor: pointer; font-weight: bold;">👁</button>
                                                 <button class="btn-attack" data-uid="${u.id}" data-mid="${mine.id}" style="border:none; background: #d32f2f; color: white; border-radius: 3px; padding: 3px 8px; font-size: 11px; cursor: pointer; font-weight: bold;">👊</button>
                                             </div>
-                                            <div id="info-res-${u.id}" style="font-size: 10px; color: #b0bec5; min-height: 14px;"></div>
+                                            <div id="info-res-${u.id}" style="font-size: 10px; color: #b0bec5; min-height: 14px;"></div>`}
                                         </div>
                                     </div>
-                                `).join('')}
+                                `}).join('')}
                             </div>
                         </div>
                         `;
