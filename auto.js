@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey
-// @version       5.3.9
+// @version       5.3.10
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.li/*
@@ -2464,7 +2464,7 @@
                 return false;
             }
         }
-
+        
         async getUsersInMine(mineId) {
 
             // --- 1. Lấy 'security' nonce (giữ logic cache của bạn) ---
@@ -6457,6 +6457,113 @@
             this.currentMineId = null;
             this.tempObserverRearrange = null; // Biến để lưu MutationObserver tạm thời khi sắp xếp
 
+            // ✅ Cache data từ hook XHR/fetch
+            this._usersCache = new Map(); // Map<mineId, {data, timestamp}>
+            this._cacheTimeout = 10000; // Cache hết hạn sau 10 giây
+            this._setupRequestHook();
+        }
+
+        /**
+         * Hook vào XMLHttpRequest và fetch để bắt response từ trang web
+         * Khi trang web gọi get_users_in_mine, ta cache lại data để dùng
+         */
+        _setupRequestHook() {
+            const self = this;
+
+            // ===== HOOK XMLHttpRequest =====
+            const originalXHRSend = XMLHttpRequest.prototype.send;
+            XMLHttpRequest.prototype.send = function(body) {
+                this.addEventListener('load', function() {
+                    try {
+                        // Kiểm tra xem request có phải get_users_in_mine không
+                        if (body && typeof body === 'string' && body.includes('get_users_in_mine')) {
+                            const data = JSON.parse(this.responseText);
+                            if (data.success && data.data) {
+                                // Trích xuất mine_id từ body
+                                const params = new URLSearchParams(body);
+                                const mineId = params.get('mine_id');
+                                if (mineId) {
+                                    self._usersCache.set(mineId, {
+                                        data: data.data,
+                                        timestamp: Date.now()
+                                    });
+                                    console.log(`[Hook XHR] ✅ Đã cache users cho mỏ ${mineId}`);
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        // Bỏ qua lỗi parse
+                    }
+                });
+                return originalXHRSend.apply(this, arguments);
+            };
+
+            // ===== HOOK fetch =====
+            const originalFetch = window.fetch;
+            window.fetch = async function(url, options) {
+                const response = await originalFetch.apply(this, arguments);
+
+                try {
+                    // Kiểm tra URL và body
+                    const body = options?.body;
+                    if (body && typeof body === 'string' && body.includes('get_users_in_mine')) {
+                        const clone = response.clone();
+                        const data = await clone.json();
+                        if (data.success && data.data) {
+                            const params = new URLSearchParams(body);
+                            const mineId = params.get('mine_id');
+                            if (mineId) {
+                                self._usersCache.set(mineId, {
+                                    data: data.data,
+                                    timestamp: Date.now()
+                                });
+                                console.log(`[Hook Fetch] ✅ Đã cache users cho mỏ ${mineId}`);
+                            }
+                        }
+                    }
+                } catch (e) {
+                    // Bỏ qua lỗi
+                }
+
+                return response;
+            };
+
+            console.log('[Hiện Tu Vi] 🪝 Đã thiết lập hook XHR/Fetch');
+        }
+
+        /**
+         * Lấy users trong mỏ - ưu tiên cache từ hook, fallback sang API
+         * @param {string} mineId - ID của mỏ
+         * @returns {Promise<object|null>}
+         */
+        async getUsersInMine(mineId) {
+            // ✅ Kiểm tra cache trước
+            const cached = this._usersCache.get(mineId);
+            if (cached && (Date.now() - cached.timestamp) < this._cacheTimeout) {
+                console.log(`[Hiện Tu Vi] 📦 Dùng cache cho mỏ ${mineId}`);
+                return cached.data;
+            }
+
+            // ⏳ Đợi tối đa 1.5 giây để hook có thời gian bắt response từ trang web
+            // Kiểm tra mỗi 100ms
+            const maxWait = 1500;
+            const checkInterval = 100;
+            let waited = 0;
+
+            while (waited < maxWait) {
+                await new Promise(r => setTimeout(r, checkInterval));
+                waited += checkInterval;
+
+                const cachedNow = this._usersCache.get(mineId);
+                if (cachedNow && (Date.now() - cachedNow.timestamp) < this._cacheTimeout) {
+                    console.log(`[Hiện Tu Vi] 📦 Dùng cache cho mỏ ${mineId} (sau ${waited}ms)`);
+                    return cachedNow.data;
+                }
+            }
+
+            // ❌ Hết thời gian đợi vẫn không có cache -> gọi API (fallback)
+            console.log(`[Hiện Tu Vi] 🔄 Không có cache sau ${maxWait}ms, gọi API cho mỏ ${mineId}`);
+            return await khoangmach.getUsersInMine(mineId);
         }
 
         async waitForElement(selector, timeout = 15000) {
@@ -6648,6 +6755,7 @@
             btn.insertAdjacentElement('afterend', info);
         }
 
+        /*
         async getUsersInMine(mineId) {
             let securityToken = null;
             // Cách 1: Lấy từ unsafeWindow (Biến thật của trang web)
@@ -6690,7 +6798,7 @@
                 return null;
             }
         }
-
+        */
         async getTuVi(userId) {
             // 0. Chuẩn bị Nonce & Headers
             if (!this.nonce) {
@@ -6827,7 +6935,7 @@
 
         async showTotalEnemies(mineId, usersData = null) {
             // Nếu đã có data thì dùng luôn, không cần gọi API lại
-            const data = usersData || await khoangmach.getUsersInMine(mineId);
+            const data = usersData || await this.getUsersInMine(mineId);
             const currentMineUsers = data && data.users ? data.users : [];
             let totalEnemies = 0;
             let totalLienMinh = 0;
@@ -6901,7 +7009,8 @@
                     image.addEventListener('click', async (event) => {
                         const mineId = event.currentTarget.getAttribute('data-mine-id');
                         if (mineId) {
-                            this.showTotalEnemies(mineId);
+                            // ✅ Không gọi showTotalEnemies ở đây nữa vì showTuVi đã làm rồi
+                            // Chỉ cần thêm listener cho reload button
                             this.addEventListenersToReloadBtn(mineId);
                         }
                     });
@@ -6969,7 +7078,7 @@
         async rearrangeUsersByEnemy(mineId, usersData = null) {
             try {
                 // Nếu đã có data thì dùng luôn, không cần gọi API lại
-                const data = usersData || await khoangmach.getUsersInMine(mineId);
+                const data = usersData || await this.getUsersInMine(mineId);
                 if (!data || !data.users || data.users.length === 0) return null;
 
                 const users = data.users;
