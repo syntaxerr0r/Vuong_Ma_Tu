@@ -165,16 +165,16 @@
                     // Cách 1: Dùng unsafeWindow (Cách chuẩn của Tampermonkey)
                     if (typeof unsafeWindow !== 'undefined' && unsafeWindow.hh3dData) {
                         unsafeWindow.hh3dData.securityToken = token;
-                        showNotification(`${logPrefix} 🔓 Đã cập nhật hh3dData thông qua unsafeWindow.`);
+                        console.log(`${logPrefix} 🔓 Đã cập nhật hh3dData thông qua unsafeWindow.`);
                     }
                     // Cách 2: Fallback nếu không có unsafeWindow
                     else if (typeof window.hh3dData !== 'undefined') {
                         window.hh3dData.securityToken = token;
-                        showNotification(`${logPrefix} ⚠️ Đã cập nhật hh3dData qua window thường.`);
+                        console.log(`${logPrefix} ⚠️ Đã cập nhật hh3dData qua window thường.`);
                     } else {
                         // Cách 3: "Tiêm thuốc" trực tiếp
                         try {
-                            showNotification(`${logPrefix} 💉 Tiêm script cập nhật token trực tiếp vào trang...`);
+                            console.log(`${logPrefix} 💉 Tiêm script cập nhật token trực tiếp vào trang...`);
                             const script = document.createElement('script');
                             script.textContent = `
                                (function () {
@@ -6611,11 +6611,9 @@
             let securityToken = null;
             // Cách 1: Lấy từ unsafeWindow (Biến thật của trang web)
             if (typeof hh3dData !== 'undefined' && hh3dData.securityToken) {
-                showNotification(`[Hiện Tu vi] ℹ️ Lấy 'security_token' từ biến global thông thường.`);
                 securityToken = hh3dData.securityToken;
             } else // Cách 2: Lấy từ unsafeWindow (Biến của trang web trong môi trường userscript)
                 if (typeof unsafeWindow !== 'undefined' && unsafeWindow.hh3dData && unsafeWindow.hh3dData.securityToken) {
-                showNotification(`[Hiện Tu vi] ℹ️ Lấy 'security_token' từ unsafeWindow.`);
                 securityToken = unsafeWindow.hh3dData.securityToken;
             } 
 
@@ -6627,7 +6625,7 @@
                 showNotification(errorMsg, 'error');
                 return null;
             }
-            showNotification(`[Hiện Tu vi] ℹ️ security_token: ${securityToken}, nonce ${this.nonceGetUserInMine}`, 'info');
+
             const payload = new URLSearchParams({
                 action: 'get_users_in_mine',
                 mine_id: mineId,
@@ -6644,7 +6642,7 @@
                 });
                 const d = await r.json();
 
-                return d.success ? d.data : (showNotification(d.data.message || 'Lỗi lấy thông tin người chơi.', 'error'), null);
+                return d.success ? d.data : (showNotification(d.data.message, 'error'), null);
 
             } catch (e) {
                 console.error(`[Hiện Tu vi] ❌ Lỗi mạng (lấy user):`, e);
@@ -6787,7 +6785,7 @@
         }
 
         async showTotalEnemies(mineId) {
-            const data = await this.getUsersInMine(mineId);
+            const data = await khoangmach.getUsersInMine(mineId);
             const currentMineUsers = data && data.users ? data.users : [];
             let totalEnemies = 0;
             let totalLienMinh = 0;
