@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey
-// @version       5.3
+// @version       5.3.1
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.li/*
@@ -2232,6 +2232,7 @@
         };
 
         async getAllMines() {
+            const mineTypes = ['gold', 'silver', 'copper'];
             const cacheKey = "HH3D_allMines";
             const cacheRaw = localStorage.getItem(cacheKey);
 
@@ -2239,7 +2240,11 @@
             if (cacheRaw && cacheRaw.length > 0) {
                 try {
                     const cache = JSON.parse(cacheRaw);
-                    if (Date.now() < cache.expiresAt && cache.data && cache.data.length > 0) {
+                    // Chỉ dùng cache nếu còn hạn VÀ đủ 3 loại mỏ
+                    const cacheTypes = new Set((cache?.data || []).map(m => String(m?.type || '')));
+                    const cacheHasAllTypes = mineTypes.every(t => cacheTypes.has(t));
+
+                    if (Date.now() < cache.expiresAt && cache.data && cache.data.length > 0 && cacheHasAllTypes) {
                         console.log("[HH3D] 🗄️ Dùng dữ liệu mỏ từ cache");
                         return {
                             optionsHtml: cache.optionsHtml,
@@ -2263,11 +2268,11 @@
                 return { optionsHtml: '', minesData: [] };
             }
 
-            const mineTypes = ['gold', 'silver', 'copper'];
-            const allMines = [];
+            // --- Load từng loại + kiểm tra đủ 3 loại ---
+            const minesByType = new Map();
+            const missingTypes = new Set(mineTypes);
 
-            // Tải song song cho nhanh
-            const requests = mineTypes.map(async type => {
+            const fetchMinesByType = async (type) => {
                 const payload = new URLSearchParams({
                     action: 'load_mines_by_type',
                     mine_type: type,
@@ -2283,20 +2288,46 @@
                     });
                     const d = await r.json();
 
-                    if (d.success) {
-                        d.data.forEach(mine => {
-                            mine.type = type;
-                            allMines.push(mine);
-                        });
-                    } else {
-                        showNotification(d.message || `Lỗi tải mỏ loại ${type}.`, 'error');
+                    if (d && d.success && Array.isArray(d.data)) {
+                        const typed = d.data.map(mine => ({ ...mine, type }));
+                        minesByType.set(type, typed);
+                        missingTypes.delete(type);
+                        return true;
                     }
+
+                    showNotification((d && (d.message || d?.data?.message)) || `Lỗi tải mỏ loại ${type}.`, 'error');
+                    return false;
                 } catch (e) {
                     console.error(`${this.logPrefix} ❌ Lỗi mạng (tải mỏ ${type}):`, e);
+                    return false;
                 }
+            };
+
+            const loadTypes = async (typesToLoad) => {
+                await Promise.all((typesToLoad || []).map(t => fetchMinesByType(t)));
+            };
+
+            // 1) Load lần đầu
+            await loadTypes(mineTypes);
+
+            // 2) Retry loại bị thiếu (tối đa 2 lần)
+            for (let attempt = 1; attempt <= 2 && missingTypes.size > 0; attempt++) {
+                const retryTypes = Array.from(missingTypes);
+                console.warn(`${this.logPrefix} ⚠️ getAllMines thiếu loại: ${retryTypes.join(', ')}. Retry lần ${attempt}/2...`);
+                await this.delay(500 * attempt);
+                await loadTypes(retryTypes);
+            }
+
+            const allMines = [];
+            mineTypes.forEach(t => {
+                const arr = minesByType.get(t);
+                if (arr && arr.length) allMines.push(...arr);
             });
 
-            await Promise.all(requests);
+            if (missingTypes.size > 0) {
+                const missing = Array.from(missingTypes);
+                showNotification(`Chưa tải đủ 3 loại mỏ. Thiếu: ${missing.join(', ')}. (Không cache dữ liệu thiếu)`, 'error');
+            }
 
             // --- Sắp xếp ---
             allMines.sort((a, b) => {
@@ -2324,11 +2355,14 @@
             const expiresAt = expireDate.getTime();
 
             // --- Lưu cache ---
-            localStorage.setItem(cacheKey, JSON.stringify({
-                data: allMines,
-                optionsHtml: mineOptionsHtml,
-                expiresAt
-            }));
+            // Chỉ cache khi đã đủ 3 loại mỏ
+            if (missingTypes.size === 0) {
+                localStorage.setItem(cacheKey, JSON.stringify({
+                    data: allMines,
+                    optionsHtml: mineOptionsHtml,
+                    expiresAt
+                }));
+            }
 
             return {
                 optionsHtml: mineOptionsHtml,
