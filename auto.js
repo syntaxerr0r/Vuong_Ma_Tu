@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey
-// @version       5.3.3
+// @version       5.3.4
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.li/*
@@ -7009,7 +7009,6 @@
                 await new Promise(resolve => document.addEventListener('DOMContentLoaded', resolve, { once: true }));
             }
             this.nonceGetUserInMine = await this.getNonceGetUserInMine();
-            showNotification(`[Hiện Tu vi] ℹ️ Lấy 'nonce' cho get_users_in_mine: ${this.nonceGetUserInMine}`);
             this.nonce = await this.getNonce();
             await this.waitForElement('#head_manage_acc', 15000);
 
