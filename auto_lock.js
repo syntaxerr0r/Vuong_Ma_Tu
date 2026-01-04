@@ -1,13 +1,13 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey
-// @version       5.2.3
+// @version       5.3
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.li/*
 // @require       https://cdn.jsdelivr.net/npm/sweetalert2@11.26.12/dist/sweetalert2.all.min.js
 // @run-at        document-start
-// @grant         GM_xmlhttpRequest
+// @grant         unsafeWindow
 // @connect       raw.githubusercontent.com
 // ==/UserScript==
 (async function() {
@@ -114,6 +114,7 @@
     /**
      * Lấy securityToken bằng cách fetch một URL (nếu có)
      * hoặc quét HTML của trang hiện tại (nếu không có URL).
+     * Nếu gặp lỗi 403 (Forbidden), sẽ mở tab mới để người dùng đăng nhập lại.
      *
      * @param {string} [url] - (Tùy chọn) URL để fetch.
      * @returns {Promise<string|null>} - Một Promise sẽ resolve với token, hoặc null nếu thất bại.
@@ -127,7 +128,16 @@
             // 1. Lấy nội dung HTML (Fetch hoặc quét trang hiện tại)
             if (url) {
                 const response = await fetch(url);
-                if (!response.ok) return null;
+                if (!response.ok) {
+                    console.error(`${logPrefix} ❌ Fetch thất bại với status: ${response.status}`);
+                    // Chỉ mở tab mới khi lỗi 403 (Forbidden - phiên hết hạn/chưa đăng nhập)
+                    if (response.status === 403) {
+                        console.error(`${logPrefix} 🚨 Lỗi 403 Forbidden. Đang mở tab mới...`);
+                        window.open(url, '_blank');
+                        showNotification('Phiên đăng nhập hết hạn (403). Đã mở tab mới, vui lòng đăng nhập lại.', 'error');
+                    }
+                    return null;
+                }
                 htmlContent = await response.text();
             } else {
                 htmlContent = document.documentElement.outerHTML;
@@ -140,10 +150,10 @@
             if (match && match[1]) {
                 const token = match[1];
 
-                // 🔥 LOGIC MỚI: Kiểm tra xem URL yêu cầu có phải là trang hiện tại không
+                // 🔥 LOGIC MỚI: Kiểm tra xem URL yêu cầu có phải là trang hiện tại không, bằng cách kiểm tra trang hiện tại có bao gồm không
                 // Nếu không truyền URL (!url) -> Mặc định là trang hiện tại
-                // Nếu có URL -> Phải trùng khớp tuyệt đối với window.location.href
-                const isCurrentPage = !url || (url === window.location.href);
+                // Nếu có URL -> Phải trùng khớp với window.location.href
+                const isCurrentPage = !url || (window.location.href.includes(url));
 
                 if (isCurrentPage) {
                     console.log(`${logPrefix} 🎯 URL trùng khớp trang hiện tại. Tiến hành cập nhật Global State...`);
@@ -161,23 +171,24 @@
                     else if (typeof window.hh3dData !== 'undefined') {
                         window.hh3dData.securityToken = token;
                         console.log(`${logPrefix} ⚠️ Đã cập nhật hh3dData qua window thường.`);
-                    }
-
-                    // Cách 3: "Tiêm thuốc" trực tiếp
-                    try {
-                        const script = document.createElement('script');
-                        script.textContent = `
-                            try {
-                                if (typeof hh3dData !== 'undefined') {
-                                    hh3dData.securityToken = "${token}";
-                                    console.log('✅ [Inject] Token đã được cập nhật từ bên trong trang web.');
-                                }
-                            } catch(e) {}
-                        `;
-                        (document.head || document.body || document.documentElement).appendChild(script);
-                        script.remove();
-                    } catch (injectErr) {
-                        console.warn(`${logPrefix} Lỗi tiêm script:`, injectErr);
+                    } else {
+                        // Cách 3: "Tiêm thuốc" trực tiếp
+                        try {
+                            console.log(`${logPrefix} 💉 Tiêm script cập nhật token trực tiếp vào trang...`);
+                            const script = document.createElement('script');
+                            script.textContent = `
+                                try {
+                                    if (typeof hh3dData !== 'undefined') {
+                                        hh3dData.securityToken = "${token}";
+                                        console.log('✅ [Inject] Token đã được cập nhật từ bên trong trang web.');
+                                    }
+                                } catch(e) {}
+                            `;
+                            (document.head || document.body || document.documentElement).appendChild(script);
+                            script.remove();
+                        } catch (injectErr) {
+                            console.warn(`${logPrefix} Lỗi tiêm script:`, injectErr);
+                        }
                     }
                     // ============================================================
                 } else {
@@ -187,6 +198,9 @@
 
                 return token;
             }
+            
+            // Không tìm thấy token trong HTML
+            console.error(`${logPrefix} ❌ Không tìm thấy securityToken trong HTML.`);
             return null;
 
         } catch (e) {
@@ -223,6 +237,7 @@
 
      /**
      * Lấy security nonce một cách chung chung từ một URL.
+     * Đồng thời cập nhật securityToken nếu tìm thấy trong HTML (vì token được tạo mới khi load page).
      *
      * @param {string} url - URL của trang web cần lấy nonce.
      * @param {RegExp} regex - Biểu thức chính quy (regex) để tìm và trích xuất nonce.
@@ -239,6 +254,45 @@
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
             const html = await response.text();
+
+            // 🔥 CẬP NHẬT: Trích xuất và cập nhật securityToken nếu có trong HTML
+            const tokenRegex = /"securityToken"\s*:\s*"([^"]+)"/;
+            const tokenMatch = html.match(tokenRegex);
+            if (tokenMatch && tokenMatch[1]) {
+                const token = tokenMatch[1];
+                console.log(`${logPrefix} 🔑 Phát hiện securityToken mới trong HTML, đang cập nhật...`);
+
+                // Kiểm tra URL có phải trang hiện tại không
+                const isCurrentPage = window.location.href.includes(url);
+
+                if (isCurrentPage) {
+                    // Cập nhật xuyên sandbox giống getSecurityToken
+                    if (typeof unsafeWindow !== 'undefined' && unsafeWindow.hh3dData) {
+                        unsafeWindow.hh3dData.securityToken = token;
+                        console.log(`${logPrefix} 🔓 Đã cập nhật hh3dData.securityToken thông qua unsafeWindow.`);
+                    } else if (typeof window.hh3dData !== 'undefined') {
+                        window.hh3dData.securityToken = token;
+                        console.log(`${logPrefix} ⚠️ Đã cập nhật hh3dData.securityToken qua window thường.`);
+                    } else {
+                        // Tiêm script trực tiếp
+                        try {
+                            const script = document.createElement('script');
+                            script.textContent = `
+                                try {
+                                    if (typeof hh3dData !== 'undefined') {
+                                        hh3dData.securityToken = "${token}";
+                                        console.log('✅ [Inject] Token đã được cập nhật từ getSecurityNonce.');
+                                    }
+                                } catch(e) {}
+                            `;
+                            (document.head || document.body || document.documentElement).appendChild(script);
+                            script.remove();
+                        } catch (injectErr) {
+                            console.warn(`${logPrefix} Lỗi tiêm script:`, injectErr);
+                        }
+                    }
+                }
+            }
 
             const match = html.match(regex);
             if (match && match[1]) {
@@ -1345,7 +1399,7 @@
                         await new Promise(resolve => setTimeout(resolve, 1000));
                         const rewardResponse = await this.sendApiRequest('wp-json/tong-mon/v1/claim-boss-reward', 'POST', nonce, {});
                         if (rewardResponse && rewardResponse.success) {
-                            showNotification(rewardResponse.message, 'success');
+                            showNotification(rewardResponse.message, 'success', 10000);
                         }
                     }
                     console.log(`${this.logPrefix} ✅ Có thể tấn công.`);
@@ -1356,7 +1410,7 @@
                     await new Promise(resolve => setTimeout(resolve, 1000));
                     const rewardResponse = await this.sendApiRequest('wp-json/tong-mon/v1/claim-boss-reward', 'POST', nonce, {});
                     if (rewardResponse && rewardResponse.success) {
-                        showNotification(rewardResponse.message, 'success')
+                        showNotification(rewardResponse.message, 'success', 10000);
                     };
                     const contributionResponse = await this.sendApiRequest('wp-json/tong-mon/v1/contribute-boss', 'POST', nonce, {});
                     if (contributionResponse) {
@@ -2471,11 +2525,12 @@
 
         async attackUser(userId, mineId) {
             const security= await this.#getNonce(/action:\s*'attack_user_in_mine'[\s\S]*?security:\s*'([a-f0-9]+)'/);
+            const securityToken = await getSecurityToken(this.khoangMachUrl);
             if (!security ) {
                 showNotification('Lỗi nonce (attack_user_in_mine).', 'error');
                 return false;
             }
-            const payload = new URLSearchParams({ action: 'attack_user_in_mine',  target_user_id: userId,  mine_id: mineId, security_token: this.securityToken, security: security});
+            const payload = new URLSearchParams({ action: 'attack_user_in_mine',  target_user_id: userId,  mine_id: mineId, security_token: securityToken, security: security});
             try {
                 const r = await fetch(this.ajaxUrl, { method: 'POST', headers: this.headers, body: payload, credentials: 'include' });
                 const d = await r.json();
@@ -2801,9 +2856,10 @@
          * Tìm kiếm kẻ địch theo ID và/hoặc theo Tông Môn (ID tông).
          * @param {string[]} enemyList - danh sách userId (string)
          * @param {string[]} tongMonList - danh sách groupId tông môn (string)
+         * @param {function} onProgressCallback - callback để cập nhật tiến độ UI
          * @returns {Promise<Array>}
          */
-        async searchEnemiesInMines(enemyList, tongMonList) {
+        async searchEnemiesInMines(enemyList, tongMonList, onProgressCallback) {
             // 1. Chuẩn bị bộ lọc (Giữ nguyên)
             const enemySet = new Set((enemyList || []).map(x => String(x).trim()).filter(Boolean));
             const tongIdSet = new Set((tongMonList || []).map(x => String(x).trim()).filter(Boolean));
@@ -2847,8 +2903,8 @@
                 dataSource = '🕵️ Quét trực tiếp';
                 showNotification('Đang quét trực tiếp...', 'info');
                 
-                // Quét mới
-                minesData = await this.scanAllMinesRawData();
+                // Quét mới (truyền callback xuống để cập nhật UI)
+                minesData = await this.scanAllMinesRawData(onProgressCallback);
                 dataTimestamp = Date.now();
 
                 // Upload lên server (Dùng hàm đã sửa header ở trên)
@@ -2898,8 +2954,11 @@
         }
 
         // Hàm phụ: Quét toàn bộ mỏ (Trả về dữ liệu thô để upload)
-        async scanAllMinesRawData() {
+        async scanAllMinesRawData(onProgress) {
                 console.log(`${this.logPrefix} 🕵️ Bắt đầu quét toàn bộ mỏ (Mode: Raw Data)...`);
+
+                // Nếu có UI truyền xuống, báo cáo ngay
+                if (onProgress) onProgress(0, 'Đang chuẩn bị dữ liệu...');
 
                 // --- BƯỚC 1: LẤY DANH SÁCH MỎ & LỌC ---
                 const allMines = await this.getAllMines();
@@ -2939,10 +2998,18 @@
 
                 // --- BƯỚC 3: VÒNG LẶP QUÉT (DÙNG LẠI TOKEN & NONCE) ---
                 const rawResult = [];
-                console.log(`${this.logPrefix} 🚀 Bắt đầu quét ${filteredMines.length} mỏ...`);
+                const totalMines = filteredMines.length;
+                console.log(`${this.logPrefix} 🚀 Bắt đầu quét ${totalMines} mỏ...`);
 
-                for (let i = 0; i < filteredMines.length; i++) {
+                for (let i = 0; i < totalMines; i++) {
                     const m = filteredMines[i];
+
+                    // === 📞 GỌI VỀ UI ĐỂ CẬP NHẬT THANH TIẾN ĐỘ ===
+                    if (onProgress) {
+                        const percent = Math.floor(((i + 1) / totalMines) * 100);
+                        onProgress(percent, `Đang quét...`);
+                    }
+                    // ===============================================
                     
                     // Payload dùng chung nonce và securityToken đã lấy ở Bước 2
                     const payload = new URLSearchParams({
@@ -2992,6 +3059,7 @@
                     await new Promise(resolve => setTimeout(resolve, 200));
                 }
 
+                if (onProgress) onProgress(100, 'Hoàn tất!');
                 console.log(`${this.logPrefix} ✅ Hoàn tất quét. Tổng số mỏ có người: ${rawResult.length}`);
                 return rawResult;
             }
@@ -3057,16 +3125,14 @@
             const PANEL_ID = 'enemyDashboard';
             const RESTORE_ID = 'enemyDashboardRestore';
 
-            // 2. Xóa panel cũ nếu đang tồn tại
+            // 2. Xóa panel cũ
             const oldPanel = document.getElementById(PANEL_ID);
             if (oldPanel) oldPanel.remove();
             const oldRestore = document.getElementById(RESTORE_ID);
             if (oldRestore) oldRestore.remove();
 
-            // 3. Hàm tiện ích: Escape HTML (Chống lỗi hiển thị tên có ký tự lạ)
+            // 3. Tiện ích
             const esc = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-
-            // 4. Hàm tiện ích: Tính thời gian (VD: 2 phút trước)
             const timeSinceStr = (ts) => {
                 if (!ts) return 'Vừa xong';
                 const seconds = Math.floor((Date.now() - ts) / 1000);
@@ -3076,7 +3142,7 @@
                 return 'Khá lâu trước';
             };
 
-            // 5. Gom nhóm user theo MineID
+            // 4. Gom nhóm
             const minesMap = foundUsers.reduce((acc, u) => {
                 const mId = String(u.mineId || 'unknown');
                 if (!acc[mId]) {
@@ -3092,18 +3158,15 @@
                 return acc;
             }, {});
 
-            // Sắp xếp mỏ nào nhiều địch nhất lên đầu
             const sortedMines = Object.values(minesMap).sort((a, b) => b.users.length - a.users.length);
 
-            // 6. Tạo giao diện Panel
+            // 5. Tạo Panel
             const panel = document.createElement('div');
             panel.id = PANEL_ID;
             panel.className = 'enemy-dashboard';
-            
-            // CSS cho Panel
             panel.style.cssText = `
                 position: fixed; right: 20px; bottom: 20px;
-                width: 400px; max-width: 95vw;
+                width: 460px; max-width: 95vw;
                 background: #1a1a1a; color: #e0e0e0;
                 border: 1px solid #444; border-radius: 8px;
                 box-shadow: 0 10px 25px rgba(0,0,0,0.7);
@@ -3112,48 +3175,59 @@
                 overflow: hidden; font-size: 13px;
             `;
 
-            // Xác định màu sắc cho nguồn dữ liệu
-            const sourceColor = source.includes('Server') ? '#4caf50' : '#ff9800'; // Xanh lá nếu Server, Cam nếu Quét tay
+            const sourceColor = source.includes('Server') ? '#4caf50' : '#ff9800';
 
-            // Render HTML
+            // HTML Structure
             panel.innerHTML = `
-                <div class="ed-header" style="padding: 10px 12px; background: #2d2d2d; border-bottom: 1px solid #3d3d3d; display: flex; justify-content: space-between; align-items: center;">
-                    <div>
+                <div class="ed-header" style="padding: 10px 12px; background: #2d2d2d; border-bottom: 1px solid #3d3d3d;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
                         <div style="font-weight: bold; font-size: 14px; color: #fff;">
                             🎯 Tìm thấy <span style="color: #ff5252;">${foundUsers.length}</span> mục tiêu
                         </div>
-                        <div style="font-size: 11px; color: #aaa; margin-top: 3px;">
-                            Nguồn: <span style="font-weight:bold; color: ${sourceColor}">${source}</span> • ${timeSinceStr(timestamp)}
+                        <div style="display: flex; gap: 5px;">
+                            <button id="btn-scan-all" style="background: #7b1fa2; color: #fff; border: none; border-radius: 4px; padding: 4px 8px; font-size: 11px; cursor: pointer; font-weight: bold;">👁 Soi tu vi</button>
+                            <button id="btn-attack-weak-global" style="background: #c62828; color: #fff; border: none; border-radius: 4px; padding: 4px 8px; font-size: 11px; cursor: pointer; font-weight: bold; display: none;">👊 Đấm Kẻ Yếu (0)</button>
+                            
+                            <button id="edMin" style="background:#3d3d3d; border:none; color:#fff; width:28px; height:28px; border-radius:4px; cursor:pointer;">—</button>
+                            <button id="edClose" style="background:#d32f2f; border:none; color:#fff; width:28px; height:28px; border-radius:4px; cursor:pointer;">✕</button>
                         </div>
                     </div>
-                    <div style="display: flex; gap: 8px;">
-                        <button id="edMin" style="background:#3d3d3d; border:none; color:#fff; width:28px; height:28px; border-radius:4px; cursor:pointer;">—</button>
-                        <button id="edClose" style="background:#d32f2f; border:none; color:#fff; width:28px; height:28px; border-radius:4px; cursor:pointer;">✕</button>
+                    <div style="font-size: 11px; color: #aaa;">
+                        Nguồn: <span style="font-weight:bold; color: ${sourceColor}">${source}</span> • ${timeSinceStr(timestamp)}
                     </div>
                 </div>
 
-                <div class="ed-body" style="padding: 10px; max-height: 50vh; overflow-y: auto; background: #1a1a1a;">
+                <div class="ed-body" style="padding: 10px; max-height: 60vh; overflow-y: auto; background: #1a1a1a;">
                     ${sortedMines.map(mine => {
                         const tongList = mine.tongMons.size > 0 ? Array.from(mine.tongMons).join(', ') : 'Vô phái';
                         return `
                         <div style="margin-bottom: 8px; border: 1px solid #333; border-radius: 6px; overflow: hidden;">
                             <div class="mine-header" data-target="m-${mine.id}" style="padding: 8px 10px; background: #252525; cursor: pointer; display: flex; justify-content: space-between; align-items: center;">
-                                <div>
-                                    <div style="font-weight: bold; color: #ffd700;">⛏ ${esc(mine.name)}</div>
-                                    <div style="font-size: 11px; color: #888;">Quân số: ${mine.users.length} | Phe: ${esc(tongList)}</div>
+                                <div style="display: flex; align-items: center; gap: 8px; flex: 1;">
+                                    <div style="flex: 1;">
+                                        <div style="font-weight: bold; color: #ffd700;">⛏ ${esc(mine.name)}</div>
+                                        <div style="font-size: 11px; color: #888;">Quân số: ${mine.users.length} | Phe: ${esc(tongList)}</div>
+                                    </div>
+                                    <button class="btn-scan-mine" data-target="m-${mine.id}" style="border: 1px solid #555; background: #333; color: #ccc; border-radius: 3px; padding: 2px 6px; font-size: 10px; cursor: pointer;">👁 Soi Mỏ</button>
+                                    <button id="btn-weak-mine-${mine.id}" class="btn-attack-weak-mine" data-target="m-${mine.id}" style="background: #ef5350; color: #fff; border: none; border-radius: 3px; padding: 2px 6px; font-size: 10px; cursor: pointer; display: none; font-weight: bold;">👊 Đấm Kẻ Yếu</button>
                                 </div>
-                                <span class="arrow" style="font-size: 10px; color: #666;">▼</span>
+                                <span class="arrow" style="font-size: 10px; color: #666; margin-left: 8px;">▼</span>
                             </div>
                             
-                            <div id="m-${mine.id}" style="display: none; padding: 5px 10px; background: #151515; border-top: 1px solid #333;">
+                            <div id="m-${mine.id}" class="mine-content" style="display: none; padding: 5px 10px; background: #151515; border-top: 1px solid #333;">
                                 ${mine.users.map(u => `
-                                    <div style="padding: 6px 0; border-bottom: 1px dashed #333; display: flex; justify-content: space-between;">
-                                        <div>
+                                    <div style="padding: 6px 0; border-bottom: 1px dashed #333; display: flex; justify-content: space-between; align-items: center;">
+                                        <div style="flex: 1;">
                                             <div style="color: #ff6b6b; font-weight: 500;">${esc(u.name)}</div>
                                             <div style="font-size: 11px; color: #777;">${esc(u.tongMonName || 'Vô phái')} - ${esc(u.role || 'Thành viên')}</div>
                                         </div>
-                                        <div style="text-align: right;">
-                                            <a href="/profile/${u.id}" target="_blank" style="font-size: 11px; color: #4fc3f7; text-decoration: none;">Info ↗</a>
+                                        
+                                        <div style="text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
+                                            <div style="display: flex; gap: 5px;">
+                                                <button class="btn-check-tuvi" data-uid="${u.id}" style="border:none; background: #039be5; color: white; border-radius: 3px; padding: 3px 8px; font-size: 11px; cursor: pointer; font-weight: bold;">👁</button>
+                                                <button class="btn-attack" data-uid="${u.id}" data-mid="${mine.id}" style="border:none; background: #d32f2f; color: white; border-radius: 3px; padding: 3px 8px; font-size: 11px; cursor: pointer; font-weight: bold;">👊</button>
+                                            </div>
+                                            <div id="info-res-${u.id}" style="font-size: 10px; color: #b0bec5; min-height: 14px;"></div>
                                         </div>
                                     </div>
                                 `).join('')}
@@ -3166,43 +3240,22 @@
 
             document.body.appendChild(panel);
 
-            // 7. Tạo nút Restore (Khi thu nhỏ)
+            // Nút Restore
             const restoreBtn = document.createElement('button');
             restoreBtn.id = RESTORE_ID;
-            restoreBtn.textContent = `🎯 Mở lại (${foundUsers.length})`;
-            restoreBtn.style.cssText = `
-                display: none; position: fixed; bottom: 20px; right: 20px;
-                padding: 8px 12px; border-radius: 20px;
-                background: #2196f3; color: white; border: none;
-                box-shadow: 0 5px 15px rgba(0,0,0,0.3);
-                cursor: pointer; z-index: 999999; font-weight: bold;
-            `;
+            restoreBtn.textContent = `🎯 (${foundUsers.length})`;
+            restoreBtn.style.cssText = `display: none; position: fixed; bottom: 20px; right: 20px; padding: 8px 12px; border-radius: 20px; background: #2196f3; color: white; border: none; box-shadow: 0 5px 15px rgba(0,0,0,0.3); cursor: pointer; z-index: 999999; font-weight: bold;`;
             document.body.appendChild(restoreBtn);
 
-            // 8. Gán sự kiện (Event Listeners)
-            const body = panel.querySelector('.ed-body');
-            
-            // Thu nhỏ
-            panel.querySelector('#edMin').onclick = () => {
-                panel.style.display = 'none';
-                restoreBtn.style.display = 'block';
-            };
+            // Event Handlers cơ bản
+            panel.querySelector('#edMin').onclick = () => { panel.style.display = 'none'; restoreBtn.style.display = 'block'; };
+            panel.querySelector('#edClose').onclick = () => { panel.remove(); restoreBtn.remove(); };
+            restoreBtn.onclick = () => { panel.style.display = 'flex'; restoreBtn.style.display = 'none'; };
 
-            // Đóng hẳn
-            panel.querySelector('#edClose').onclick = () => {
-                panel.remove();
-                restoreBtn.remove();
-            };
-
-            // Mở lại
-            restoreBtn.onclick = () => {
-                panel.style.display = 'flex';
-                restoreBtn.style.display = 'none';
-            };
-
-            // Click từng mỏ để xổ xuống (Accordion)
+            // Accordion Logic
             panel.querySelectorAll('.mine-header').forEach(header => {
-                header.onclick = () => {
+                header.onclick = (e) => {
+                    if (e.target.tagName === 'BUTTON') return; 
                     const targetId = header.getAttribute('data-target');
                     const content = document.getElementById(targetId);
                     const arrow = header.querySelector('.arrow');
@@ -3214,9 +3267,238 @@
                 };
             });
             
-            // Tự động mở mỏ đầu tiên (nhiều địch nhất) cho tiện
+            // Mở mỏ đầu tiên
             const firstHeader = panel.querySelector('.mine-header');
-            if(firstHeader) firstHeader.click();
+            if (firstHeader) firstHeader.click();
+
+            // Biến quản lý trạng thái nút Global
+            const btnWeakGlobal = panel.querySelector('#btn-attack-weak-global');
+            let weakCountGlobal = 0;
+
+            // ============================================================
+            // ⚔️ LOGIC: HELPER HÀM ĐẤM TỰ ĐỘNG (Dùng chung)
+            // ============================================================
+            const runBatchAttack = async (targets, statusBtn) => {
+                if (targets.length === 0) {
+                    showNotification('Không có mục tiêu nào!', 'warning');
+                    return;
+                }
+
+                if (!confirm(`Tìm thấy ${targets.length} mục tiêu "Không tốn lượt".\nBắt đầu đấm? (Delay 6s/người)`)) {
+                    return;
+                }
+
+                const originalText = statusBtn.textContent;
+                statusBtn.disabled = true;
+
+                for (let i = 0; i < targets.length; i++) {
+                    const btn = targets[i];
+                    
+                    // Cập nhật trạng thái nút
+                    statusBtn.textContent = `⏳ ${i + 1}/${targets.length} (Chờ 6s)`;
+
+                    // Thực hiện đấm
+                    btn.click();
+                    
+                    // Xóa class
+                    btn.classList.remove('is-weak-target');
+                    btn.style.border = 'none';
+
+                    // Delay 6s (Trừ người cuối cùng)
+                    if (i < targets.length - 1) {
+                        await new Promise(r => setTimeout(r, 6000));
+                    }
+                }
+
+                statusBtn.textContent = '✅ Xong';
+                setTimeout(() => {
+                    statusBtn.style.display = 'none'; // Ẩn nút sau khi xong
+                    statusBtn.disabled = false;
+                    statusBtn.textContent = originalText;
+                }, 3000);
+                showNotification('Đã xử lý xong danh sách!', 'success');
+            };
+
+            // ============================================================
+            // ⚔️ LOGIC: CHECK TU VI
+            // ============================================================
+            panel.querySelectorAll('.btn-check-tuvi').forEach(btn => {
+                btn.onclick = async (e) => {
+                    e.stopPropagation();
+                    const uid = btn.getAttribute('data-uid');
+                    const resDiv = document.getElementById(`info-res-${uid}`);
+                    const attackBtn = btn.parentElement.querySelector('.btn-attack');
+
+                    btn.disabled = true;
+                    btn.textContent = '...';
+                    resDiv.textContent = 'Đang xem...';
+                    
+                    try {
+                        const data = await hienTuviKM.enemyInfo(uid);
+
+                        if (data) {
+                            const tuViStr = new Intl.NumberFormat('vi-VN').format(data.tuVi || 0);
+                            let rightSideHtml = '';
+
+                            // ⚡ KÈO THƠM: KHÔNG TỐN LƯỢT
+                            if (data.notCountAttack) {
+                                rightSideHtml = `<span style="color: #ea80fc; font-weight: bold; text-shadow: 0 0 5px rgba(234,128,252,0.5);">⚡ Không tốn lượt</span>`;
+                                
+                                // Đánh dấu nút tấn công
+                                if (attackBtn) {
+                                    attackBtn.classList.add('is-weak-target');
+                                    attackBtn.style.border = '1px solid #ea80fc';
+                                    attackBtn.style.boxShadow = '0 0 5px #ea80fc';
+                                    
+                                    // 1. Cập nhật nút Global
+                                    weakCountGlobal++;
+                                    btnWeakGlobal.style.display = 'block';
+                                    btnWeakGlobal.textContent = `👊 Đấm Kẻ Yếu (${weakCountGlobal})`;
+
+                                    // 2. Cập nhật nút Local (Của mỏ)
+                                    const mid = attackBtn.getAttribute('data-mid');
+                                    const btnWeakMine = document.getElementById(`btn-weak-mine-${mid}`);
+                                    if (btnWeakMine) {
+                                        btnWeakMine.style.display = 'block';
+                                        // Tăng đếm cho mỏ (lưu vào attribute data-count)
+                                        let currentCount = parseInt(btnWeakMine.getAttribute('data-count') || 0) + 1;
+                                        btnWeakMine.setAttribute('data-count', currentCount);
+                                        btnWeakMine.textContent = `👊 Đấm Kẻ Yếu (${currentCount})`;
+                                    }
+                                }
+
+                            } else {
+                                // Kèo thường
+                                const winRateRaw = data.winRate || '?';
+                                const winRateDisplay = String(winRateRaw).includes('%') ? winRateRaw : `${winRateRaw}%`;
+                                let rateNumber = parseInt(String(winRateRaw).replace('%', ''));
+                                if (isNaN(rateNumber)) rateNumber = -1;
+
+                                let rateColor = '#ffffff';
+                                if (rateNumber === -1) rateColor = '#808080';
+                                else if (rateNumber < 25) rateColor = '#ff5f5f';
+                                else if (rateNumber > 75) rateColor = '#00ff00';
+
+                                rightSideHtml = `<span style="color: ${rateColor}; font-weight: bold;">${winRateDisplay}</span>`;
+                                
+                                // Xóa dấu hiệu nếu user soi lại và thấy không còn ngon
+                                if (attackBtn && attackBtn.classList.contains('is-weak-target')) {
+                                    attackBtn.classList.remove('is-weak-target');
+                                    attackBtn.style.border = 'none';
+                                    attackBtn.style.boxShadow = 'none';
+                                }
+                            }
+
+                            resDiv.innerHTML = `<span style="color: #4fc3f7;">${tuViStr}</span> | ${rightSideHtml}`;
+                        } else {
+                            resDiv.textContent = 'K.Rõ';
+                            resDiv.style.color = '#ff5252';
+                        }
+                    } catch (err) {
+                        console.error(err);
+                        resDiv.textContent = 'Lỗi';
+                    } finally {
+                        btn.textContent = '👁'; 
+                        btn.disabled = false;
+                        btn.classList.add('checked-done');
+                    }
+                };
+            });
+
+            // ============================================================
+            // ⚔️ LOGIC: ATTACK (Đơn lẻ)
+            // ============================================================
+            panel.querySelectorAll('.btn-attack').forEach(btn => {
+                btn.onclick = (e) => {
+                    e.stopPropagation();
+                    const uid = btn.getAttribute('data-uid');
+                    const mid = btn.getAttribute('data-mid');
+                    btn.textContent = '⚔';
+                    
+                    if (typeof khoangmach !== 'undefined' && khoangmach.attackUser) {
+                        khoangmach.attackUser(uid, mid);
+                        setTimeout(() => {
+                            btn.textContent = '✔';
+                            btn.style.opacity = '0.5';
+                        }, 500);
+                    } else {
+                        showNotification("Lỗi: Không tìm thấy hàm tấn công!", "error");
+                    }
+                };
+            });
+
+            // ============================================================
+            // 🚀 LOGIC: SOI HÀNG LOẠT (Global & Local)
+            // ============================================================
+            const runBatchScan = async (buttons) => {
+                if (!buttons || buttons.length === 0) return;
+                
+                // Khi soi mới, cần reset các biến đếm nếu muốn chính xác tuyệt đối, 
+                // nhưng ở đây ta cứ cộng dồn cho đơn giản hoặc user tự tắt bật lại panel.
+                showNotification(`Đang soi ${buttons.length} mục tiêu...`, 'info');
+
+                for (const btn of buttons) {
+                    if (!btn.disabled && !btn.classList.contains('checked-done')) {
+                        btn.click(); 
+                        await new Promise(r => setTimeout(r, 500)); // Delay soi 500ms
+                    }
+                }
+                showNotification('Đã soi xong.', 'success');
+            };
+
+            panel.querySelector('#btn-scan-all').onclick = () => {
+                // Reset đếm toàn cục khi soi lại từ đầu (tuỳ chọn)
+                weakCountGlobal = 0;
+                btnWeakGlobal.style.display = 'none';
+                
+                const allBtns = panel.querySelectorAll('.btn-check-tuvi');
+                runBatchScan(allBtns);
+            };
+
+            panel.querySelectorAll('.btn-scan-mine').forEach(btn => {
+                btn.onclick = (e) => {
+                    e.stopPropagation();
+                    const targetId = btn.getAttribute('data-target');
+                    const mineContainer = document.getElementById(targetId);
+                    
+                    // Reset đếm cục bộ của mỏ này
+                    const mid = targetId.replace('m-', '');
+                    const btnWeakMine = document.getElementById(`btn-weak-mine-${mid}`);
+                    if(btnWeakMine) {
+                        btnWeakMine.style.display = 'none';
+                        btnWeakMine.setAttribute('data-count', 0);
+                    }
+
+                    if(mineContainer && mineContainer.style.display === 'none') mineContainer.style.display = 'block';
+                    if (mineContainer) {
+                        runBatchScan(mineContainer.querySelectorAll('.btn-check-tuvi'));
+                    }
+                };
+            });
+
+            // ============================================================
+            // 💀 LOGIC: ĐẤM KẺ YẾU (Xử lý sự kiện click)
+            // ============================================================
+            
+            // 1. Sự kiện nút Tổng (Global)
+            btnWeakGlobal.onclick = () => {
+                const targets = panel.querySelectorAll('.btn-attack.is-weak-target');
+                runBatchAttack(targets, btnWeakGlobal);
+            };
+
+            // 2. Sự kiện nút Từng Mỏ (Local)
+            panel.querySelectorAll('.btn-attack-weak-mine').forEach(btn => {
+                btn.onclick = (e) => {
+                    e.stopPropagation(); // Không đóng mở accordion
+                    const targetId = btn.getAttribute('data-target'); // m-xxxx
+                    const mineContainer = document.getElementById(targetId);
+                    if (mineContainer) {
+                        // Chỉ tìm kẻ yếu trong mỏ này
+                        const targets = mineContainer.querySelectorAll('.btn-attack.is-weak-target');
+                        runBatchAttack(targets, btn);
+                    }
+                };
+            });
         }
 
     }
@@ -4620,7 +4902,49 @@
 
         // Phương thức tạo menu "Khoáng Mạch"
         async createKhoangMachMenu(parentGroup) {
-            const { optionsHtml, minesData } = await khoangmach.getAllMines();
+            const { minesData } = await khoangmach.getAllMines();
+
+            // Lấy danh sách mỏ yêu thích từ localStorage
+            const getFavoriteMineIds = () => {
+                const favoriteIds = new Set();
+                for (let i = 0; i < localStorage.length; i++) {
+                    const key = localStorage.key(i);
+                    // Kiểm tra pattern: favorite_mine_{accountId}_{mineId}
+                    const match = key.match(/^favorite_mine_(\d+)_(\d+)$/);
+                    if (match && match[1] === String(accountId)) {
+                        favoriteIds.add(match[2]); // mineId
+                    }
+                }
+                return favoriteIds;
+            };
+
+            // Sinh options HTML với mỏ yêu thích lên đầu và tô màu vàng
+            const buildMineOptionsHtml = () => {
+                const favoriteIds = getFavoriteMineIds();
+                
+                // Tách mỏ yêu thích và không yêu thích
+                const favoriteMines = minesData.filter(m => favoriteIds.has(String(m.id)));
+                const normalMines = minesData.filter(m => !favoriteIds.has(String(m.id)));
+
+                const generateOption = (mine, isFavorite) => {
+                    let typePrefix = '';
+                    if (mine.type === 'gold') typePrefix = '[Thượng] ';
+                    else if (mine.type === 'silver') typePrefix = '[Trung] ';
+                    else if (mine.type === 'copper') typePrefix = '[Hạ] ';
+                    
+                    const starPrefix = isFavorite ? '⭐ ' : '';
+                    const style = isFavorite ? 'style="background-color: #ffeb3b; color: #000;"' : '';
+                    return `<option value="${mine.id}" ${style}>${starPrefix}${typePrefix}${mine.name} (${mine.id})</option>`;
+                };
+
+                // Mỏ yêu thích lên đầu
+                const favoriteHtml = favoriteMines.map(m => generateOption(m, true)).join('');
+                const normalHtml = normalMines.map(m => generateOption(m, false)).join('');
+
+                return favoriteHtml + normalHtml;
+            };
+
+            const optionsHtml = buildMineOptionsHtml();
 
             const container = document.createElement('div');
             container.classList.add('custom-script-khoang-mach-container');
@@ -5059,14 +5383,52 @@
 
             searchButton.addEventListener('click', async () => {
                 searchButton.disabled = true;
-                searchButton.textContent = 'Đang tìm kiếm...';
+                const originalText = 'Bắt đầu tìm kiếm';
+
+                // 1️⃣ ĐỊNH NGHĨA HÀM CẬP NHẬT UI (Cái bộ đàm)
+                // Hàm này nằm ngay trong scope của UI nên nó sửa được nút searchButton
+                const updateBtn = (percent, msg) => {
+                    // Giới hạn 0-100
+                    percent = percent > 100 ? 100 : percent;
+                    
+                    // Cập nhật chữ
+                    searchButton.textContent = `${percent}% - ${msg}`;
+                    
+                    // Cập nhật màu nền (Progress Bar Effect)
+                    // Màu xanh (#2e7d32) chạy đè lên màu xám (#333)
+                    searchButton.style.background = `linear-gradient(90deg, #2e7d32 ${percent}%, #333 ${percent}%)`;
+                    searchButton.style.color = '#fff';
+                };
+
+                // Khởi tạo
+                updateBtn(0, 'Đang chuẩn bị...');
+
                 const rawEnemyIds = searchEnemiesInput.value;
                 const enemyList = rawEnemyIds.split(';').map(id => id.trim()).filter(id => id); 
                 const rawTongMonIds = searchTongMonInput.value;
                 const tongMonList = rawTongMonIds.split(';').map(id => id.trim()).filter(id => id);
-                await khoangmach.searchEnemiesInMines(enemyList, tongMonList);
-                searchButton.textContent = 'Bắt đầu tìm kiếm';
-                searchButton.disabled = false;
+
+                try {
+                    // 2️⃣ GỌI HÀM LOGIC VÀ TRUYỀN HÀM UI VÀO (Tham số thứ 3)
+                    await khoangmach.searchEnemiesInMines(enemyList, tongMonList, updateBtn);
+
+                    // Xử lý xong
+                    updateBtn(100, 'Xong!');
+                    await new Promise(r => setTimeout(r, 500)); // Đợi xíu cho đẹp
+
+                } catch (err) {
+                    console.error(err);
+                    showNotification('Lỗi tìm kiếm', 'error');
+                } finally {
+                    // Reset nút về ban đầu
+                    searchButton.disabled = false;
+                    searchButton.textContent = originalText;
+                    searchButton.style.background = ''; // Xóa gradient để về CSS mặc định
+                    
+                    // Enable nút xem kết quả nếu có
+                    const hasData = sessionStorage.getItem(`khoangmach_enemy_search_results`);
+                    if(hasData) viewResultsButton.disabled = false;
+                }
             });
 
             viewResultsButton.addEventListener('click', () => {
@@ -6210,22 +6572,16 @@
 
         async getUsersInMine(mineId) {
             let securityToken = null;
-
             // Cách 1: Lấy từ unsafeWindow (Biến thật của trang web)
-            if (typeof unsafeWindow !== 'undefined' && unsafeWindow.hh3dData && unsafeWindow.hh3dData.securityToken) {
+            if (typeof hh3dData !== 'undefined' && hh3dData.securityToken) {
+                console.log(`[Hiện Tu vi] ℹ️ Lấy 'security_token' từ biến global thông thường.`);
+                securityToken = hh3dData.securityToken;
+            } else // Cách 2: Lấy từ unsafeWindow (Biến của trang web trong môi trường userscript)
+                if (typeof unsafeWindow !== 'undefined' && unsafeWindow.hh3dData && unsafeWindow.hh3dData.securityToken) {
+                console.log(`[Hiện Tu vi] ℹ️ Lấy 'security_token' từ unsafeWindow.`);
                 securityToken = unsafeWindow.hh3dData.securityToken;
             } 
-            // Cách 2: Lấy từ window thường
-            else if (typeof hh3dData !== 'undefined' && hh3dData.securityToken) {
-                securityToken = hh3dData.securityToken;
-            }
 
-            // Cách 3: Nếu vẫn null -> Gọi hàm quét (Fallback cuối cùng)
-            if (!securityToken) {
-                console.log(`${this.logPrefix} ⚠️ Token biến global bị thiếu, đang fetch lại...`);
-                // Gọi hàm getSecurityToken chúng ta đã viết ở trên
-                securityToken = await getSecurityToken(this.khoangMachUrl || window.location.href);
-            }
             if (!this.nonceGetUserInMine || !securityToken) {
                 let errorMsg = 'Lỗi (get_users):';
                 if (!this.nonceGetUserInMine) errorMsg += " Nonce (security) chưa được cung cấp.";
@@ -6254,7 +6610,7 @@
                 return d.success ? d.data : (showNotification(d.message || 'Lỗi lấy thông tin người chơi.', 'error'), null);
 
             } catch (e) {
-                console.error(`${this.logPrefix} ❌ Lỗi mạng (lấy user):`, e);
+                console.error(`[Hiện Tu vi] ❌ Lỗi mạng (lấy user):`, e);
                 return null;
             }
         }
@@ -6274,7 +6630,7 @@
             const targetId = String(userId);
 
             // ============================================================
-            // 🟢 CÁCH 1: LOGIC CŨ (GIỮ NGUYÊN BẢN GỐC)
+            // 🟢 CÁCH 1: LOGIC CŨ (SEARCH TRỰC TIẾP)
             // ============================================================
             try {
                 const res = await fetch(`${weburl}/wp-json/luan-vo/v1/search-users`, {
@@ -6287,7 +6643,7 @@
 
                 // Logic gốc: Lấy user đầu tiên trong danh sách (users[0])
                 const points = res.ok ? (await res.json())?.data?.users?.[0]?.points ?? null : null;
-                
+
                 // Nếu tìm thấy điểm -> Trả về luôn
                 if (points !== null && points !== undefined) {
                     return points;
@@ -6298,9 +6654,7 @@
 
             // ============================================================
             // 🔴 CÁCH 2: FALLBACK (FOLLOW -> SCAN -> UNFOLLOW)
-            // Chỉ chạy khi Cách 1 trả về null hoặc lỗi
             // ============================================================
-            // console.log(`[GetTuVi] Cách 1 thất bại, đang dùng Fallback cho ID ${targetId}...`);
             
             let tuVi = null;
 
@@ -6337,19 +6691,62 @@
             } catch (e) {
                 console.error(`[GetTuVi] Fallback lỗi:`, e);
             } finally {
-                // B2.3: Unfollow (Luôn chạy để dọn rác)
-                try {
-                    await fetch(`${weburl}/wp-json/luan-vo/v1/unfollow`, {
-                        method: "POST",
-                        headers: headers,
-                        body: JSON.stringify({ unfollow_user_id: targetId }),
-                        credentials: "include",
-                        mode: "cors"
-                    });
-                } catch (ignore) {}
+                // ============================================================
+                // 🧹 B2.3: UNFOLLOW CHẮC CHẮN (RETRY LOGIC)
+                // ============================================================
+                let retryCount = 0;
+                const maxRetries = 3;
+                let isUnfollowed = false;
+
+                while (retryCount < maxRetries && !isUnfollowed) {
+                    try {
+                        // Nếu là lần retry (retryCount > 0), đợi 1 chút trước khi gọi
+                        if (retryCount > 0) await new Promise(r => setTimeout(r, 1000));
+
+                        const resUn = await fetch(`${weburl}/wp-json/luan-vo/v1/unfollow`, {
+                            method: "POST",
+                            headers: headers,
+                            body: JSON.stringify({ unfollow_user_id: targetId }),
+                            credentials: "include",
+                            mode: "cors"
+                        });
+
+                        const dataUn = await resUn.json();
+
+                        // Kiểm tra dựa trên response bạn cung cấp: {"success":true,"message":"Hủy theo dõi thành công."}
+                        if (dataUn && dataUn.success) {
+                            // console.log(`[GetTuVi] Đã hủy theo dõi ID ${targetId} thành công.`);
+                            isUnfollowed = true;
+                        } else {
+                            console.warn(`[GetTuVi] Hủy theo dõi thất bại (Lần ${retryCount + 1}):`, dataUn.message);
+                        }
+                    } catch (err) {
+                        console.warn(`[GetTuVi] Lỗi mạng khi Unfollow (Lần ${retryCount + 1}):`, err);
+                    }
+                    retryCount++;
+                }
+
+                if (!isUnfollowed) {
+                    console.error(`[GetTuVi] ❌ CẢNH BÁO: Không thể hủy theo dõi ID ${targetId} sau ${maxRetries} lần thử. Vui lòng kiểm tra thủ công.`);
+                }
             }
 
             return tuVi;
+        }
+
+        async enemyInfo(userId) {
+            const myTuVi = await this.getSelfTuVi();
+            const opponentTuVi = await this.getTuVi(userId);
+            const winRate = this.winRate(myTuVi, opponentTuVi).toFixed(2);
+            let notCountAttack = false;
+            if (opponentTuVi*10< myTuVi) {
+                notCountAttack = true;
+            }
+            return {
+                tuVi: opponentTuVi,
+                winRate: winRate,
+                notCountAttack: notCountAttack
+            };
         }
 
         async showTotalEnemies(mineId) {
@@ -6358,8 +6755,6 @@
             let totalEnemies = 0;
             let totalLienMinh = 0;
             let totalDongMon = 0;
-            const myTuVi = await this.getSelfTuVi();
-            let isInMine = currentMineUsers.some(user => user.id.toString() === accountId.toString());
             for (let user of currentMineUsers) {
                 if (user.dong_mon) {
                     totalDongMon++;
@@ -6442,7 +6837,21 @@
             if (!myTuVi) return;
 
             const buttons = document.querySelectorAll('.attack-btn');
-            for (const btn of buttons) {
+            if (buttons.length === 0) return;
+
+            // Lấy mineId từ nút đầu tiên
+            const mineId = buttons[0]?.getAttribute('data-mine-id');
+            
+            // Sắp xếp lại thứ tự hiển thị: Kẻ địch lên đầu (trừ chủ mỏ và bản thân)
+            if (mineId && !document.body.dataset.rearranged) {
+                await this.rearrangeUsersByEnemy(mineId);
+                document.body.dataset.rearranged = mineId; // Đánh dấu đã sắp xếp cho mỏ này
+            }
+
+            // Lấy lại buttons sau khi đã sắp xếp
+            const buttonsAfterRearrange = document.querySelectorAll('.attack-btn');
+            
+            for (const btn of buttonsAfterRearrange) {
                 if (btn.dataset.tuviAttached === '1') continue;
                 btn.dataset.tuviAttached = '1';
 
@@ -6462,7 +6871,6 @@
                     console.error('getTuVi error', e);
                 }
 
-                const mineId = btn.getAttribute('data-mine-id');
                 if (mineId && mineId !== this.currentMineId) {
                     this.currentMineId = mineId;
                     this.showTotalEnemies(mineId);
@@ -6470,6 +6878,94 @@
                 }
                 // nghỉ 1s tránh spam
                 await new Promise(r => setTimeout(r, 1000));
+            }
+        }
+
+        /**
+         * Sắp xếp lại các user trong mỏ: đưa kẻ địch lên đầu (trừ chủ mỏ vị trí 0 và bản thân)
+         * @param {string} mineId - ID của mỏ
+         */
+        async rearrangeUsersByEnemy(mineId) {
+            try {
+                // Lấy dữ liệu users từ API
+                const data = await this.getUsersInMine(mineId);
+                if (!data || !data.users || data.users.length === 0) return;
+
+                const users = data.users;
+                
+                // Tạo map userId -> user data để tra cứu nhanh
+                const userMap = new Map();
+                users.forEach(u => userMap.set(String(u.id), u));
+
+                // Lấy container chứa các user (thường là parent của các attack-btn)
+                const buttons = document.querySelectorAll('.attack-btn');
+                if (buttons.length === 0) return;
+
+                // Tìm container cha chung của các user items
+                const firstBtn = buttons[0];
+                const userContainer = firstBtn.closest('.batquai-item')?.parentElement 
+                                   || firstBtn.closest('[class*="user"]')?.parentElement
+                                   || firstBtn.parentElement?.parentElement;
+                
+                if (!userContainer) return;
+
+                // Lấy tất cả các user items (phần tử con trực tiếp chứa attack-btn)
+                const userItems = Array.from(userContainer.children).filter(el => 
+                    el.querySelector('.attack-btn')
+                );
+
+                if (userItems.length <= 1) return;
+
+                // Lấy accountId của bản thân
+                const selfId = String(accountId);
+                
+                // Xác định chủ mỏ (vị trí đầu tiên trong danh sách API)
+                const ownerId = users.length > 0 ? String(users[0].id) : null;
+
+                // Phân loại các items
+                const ownerItem = []; // Chủ mỏ - giữ nguyên vị trí đầu
+                const selfItem = [];  // Bản thân - giữ nguyên vị trí
+                const enemyItems = []; // Kẻ địch - đưa lên sau chủ mỏ
+                const allyItems = [];  // Đồng minh/Liên minh - xuống cuối
+
+                for (const item of userItems) {
+                    const btn = item.querySelector('.attack-btn');
+                    const userId = btn?.getAttribute('data-user-id');
+                    
+                    if (!userId) {
+                        allyItems.push(item);
+                        continue;
+                    }
+
+                    const userData = userMap.get(userId);
+                    
+                    if (userId === ownerId) {
+                        // Chủ mỏ - giữ đầu
+                        ownerItem.push(item);
+                    } else if (userId === selfId) {
+                        // Bản thân - giữ nguyên (sẽ để sau chủ mỏ)
+                        selfItem.push(item);
+                    } else if (userData && !userData.dong_mon && !userData.lien_minh) {
+                        // Kẻ địch - đưa lên đầu (sau chủ mỏ và bản thân)
+                        enemyItems.push(item);
+                    } else {
+                        // Đồng môn/Liên minh - xuống cuối
+                        allyItems.push(item);
+                    }
+                }
+
+                // Sắp xếp lại: Chủ mỏ -> Bản thân -> Kẻ địch -> Đồng minh
+                const newOrder = [...ownerItem, ...selfItem, ...enemyItems, ...allyItems];
+
+                // Chèn lại các items theo thứ tự mới
+                for (const item of newOrder) {
+                    userContainer.appendChild(item);
+                }
+
+                console.log(`[Hiện Tu Vi] ✅ Đã sắp xếp lại: ${enemyItems.length} kẻ địch lên đầu`);
+
+            } catch (e) {
+                console.error('[Hiện Tu Vi] ❌ Lỗi sắp xếp users:', e);
             }
         }
 
@@ -6505,7 +7001,7 @@
             mainObserver.observe(document.body, { childList: true, subtree: true });
         }
     }
-     // ===============================================
+    // ===============================================
     // Bộ lọc tông môn
     // ===============================================
     async function getDivContent(url, selector) {
@@ -6628,10 +7124,9 @@
     await tienduyen.init();
     const automatic = new AutomationManager();
     new Promise(resolve => setTimeout(resolve, 2000)); // Đợi 2 giây để UI ổn định
-
-    automatic.checkAndStart()
+    const hienTuviKM = new hienTuviKhoangMach()
+    automatic.checkAndStart();
     if (location.pathname.includes('khoang-mach') || location.href.includes('khoang-mach')) {
-        const hienTuviKM = new hienTuviKhoangMach();
         hienTuviKM.startUp();
     }
 })();
