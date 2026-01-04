@@ -6644,7 +6644,7 @@
                 });
                 const d = await r.json();
 
-                return d.success ? d.data : (showNotification(d.message || 'Lỗi lấy thông tin người chơi.', 'error'), null);
+                return d.success ? d.data : (showNotification(d.data.message || 'Lỗi lấy thông tin người chơi.', 'error'), null);
 
             } catch (e) {
                 console.error(`[Hiện Tu vi] ❌ Lỗi mạng (lấy user):`, e);
