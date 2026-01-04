@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey
-// @version       5.3.7
+// @version       5.3.8
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.li/*
@@ -119,7 +119,7 @@
      * @param {string} [url] - (Tùy chọn) URL để fetch.
      * @returns {Promise<string|null>} - Một Promise sẽ resolve với token, hoặc null nếu thất bại.
      */
-async function getSecurityToken(url) {
+    async function getSecurityToken(url) {
         const logPrefix = "[SecurityTokenFetcher]";
         console.log(`${logPrefix} ▶️ Bắt đầu lấy security token từ ${url || 'trang hiện tại'}...`);
 
@@ -264,29 +264,38 @@ async function getSecurityToken(url) {
      * @returns {Promise<string|null>} Trả về security nonce nếu tìm thấy, ngược lại trả về null.
      */
     async function getSecurityNonce(url, regex) {
-        // Sử dụng một tiền tố log cố định cho đơn giản
         const logPrefix = '[HH3D Auto]';
 
-        console.log(`${logPrefix} ▶️ Đang tải trang từ ${url} để lấy security nonce...`);
+        // ✅ LOGIC MỚI: nếu url là trang hiện tại (include) thì đọc DOM, không fetch
+        const isCurrentPage = !url || window.location.href.includes(url);
+
+        console.log(`${logPrefix} ▶️ Đang lấy security nonce từ ${url || 'trang hiện tại'}...`);
+
         try {
-            const response = await fetch(url);
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+            let html = '';
+
+            if (isCurrentPage) {
+                // Đọc HTML từ DOM hiện tại, không cần fetch
+                html = document.documentElement.outerHTML;
+                console.log(`${logPrefix} 📄 Đọc HTML từ DOM (không fetch).`);
+            } else {
+                // Fetch từ URL khác
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                html = await response.text();
             }
-            const html = await response.text();
 
             // 🔥 CẬP NHẬT: Trích xuất và cập nhật securityToken nếu có trong HTML
             const tokenRegex = /"securityToken"\s*:\s*"([^"]+)"/;
             const tokenMatch = html.match(tokenRegex);
             if (tokenMatch && tokenMatch[1]) {
                 const token = tokenMatch[1];
-                console.log(`${logPrefix} 🔑 Phát hiện securityToken mới trong HTML, đang cập nhật...`);
+                console.log(`${logPrefix} 🔑 Phát hiện securityToken trong HTML, đang cập nhật...`);
 
-                // Kiểm tra URL có phải trang hiện tại không
-                const isCurrentPage = window.location.href.includes(url);
-
+                // Chỉ cập nhật global state khi đang ở trang hiện tại
                 if (isCurrentPage) {
-                    // Cập nhật xuyên sandbox giống getSecurityToken
                     if (typeof unsafeWindow !== 'undefined' && unsafeWindow.hh3dData) {
                         unsafeWindow.hh3dData.securityToken = token;
                         console.log(`${logPrefix} 🔓 Đã cập nhật hh3dData.securityToken thông qua unsafeWindow.`);
@@ -297,13 +306,17 @@ async function getSecurityToken(url) {
                         // Tiêm script trực tiếp
                         try {
                             const script = document.createElement('script');
+                            const tokenLiteral = JSON.stringify(token);
                             script.textContent = `
-                                try {
-                                    if (typeof hh3dData !== 'undefined') {
-                                        hh3dData.securityToken = "${token}";
-                                        console.log('✅ [Inject] Token đã được cập nhật từ getSecurityNonce.');
-                                    }
-                                } catch(e) {}
+                                (function () {
+                                    try {
+                                        if (typeof window.hh3dData !== 'undefined' && window.hh3dData) {
+                                            window.hh3dData.securityToken = ${tokenLiteral};
+                                        } else if (typeof hh3dData !== 'undefined' && hh3dData) {
+                                            hh3dData.securityToken = ${tokenLiteral};
+                                        }
+                                    } catch (e) {}
+                                })();
                             `;
                             (document.head || document.body || document.documentElement).appendChild(script);
                             script.remove();
@@ -2580,6 +2593,14 @@ async function getSecurityToken(url) {
 
 
         async attackUser(userId, mineId) {
+            // ✅ Kiểm tra cooldown: không cho tấn công cách nhau dưới 5500ms
+            const now = Date.now();
+            if (this._lastAttackTime && (now - this._lastAttackTime) < 5500) {
+                const remaining = Math.ceil((5500 - (now - this._lastAttackTime)) / 1000);
+                showNotification(`Vui lòng chờ ${remaining}s trước khi tấn công tiếp.`, 'warn');
+                return false;
+            }
+
             const security= await this.#getNonce(/action:\s*'attack_user_in_mine'[\s\S]*?security:\s*'([a-f0-9]+)'/);
             const securityToken = await getSecurityToken(this.khoangMachUrl);
             if (!security ) {
@@ -2591,6 +2612,7 @@ async function getSecurityToken(url) {
                 const r = await fetch(this.ajaxUrl, { method: 'POST', headers: this.headers, body: payload, credentials: 'include' });
                 const d = await r.json();
                 if (d.success) {
+                    this._lastAttackTime = Date.now(); // ✅ Ghi lại thời điểm tấn công thành công
                     showNotification(d.data.message || 'Đã tấn công người chơi.', 'success');
                     return true;
                 } else {
