@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey
-// @version       5.3.1
+// @version       5.3.2
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.li/*
@@ -165,24 +165,27 @@
                     // Cách 1: Dùng unsafeWindow (Cách chuẩn của Tampermonkey)
                     if (typeof unsafeWindow !== 'undefined' && unsafeWindow.hh3dData) {
                         unsafeWindow.hh3dData.securityToken = token;
-                        console.log(`${logPrefix} 🔓 Đã cập nhật hh3dData thông qua unsafeWindow.`);
+                        showNotification(`${logPrefix} 🔓 Đã cập nhật hh3dData thông qua unsafeWindow.`);
                     }
                     // Cách 2: Fallback nếu không có unsafeWindow
                     else if (typeof window.hh3dData !== 'undefined') {
                         window.hh3dData.securityToken = token;
-                        console.log(`${logPrefix} ⚠️ Đã cập nhật hh3dData qua window thường.`);
+                        showNotification(`${logPrefix} ⚠️ Đã cập nhật hh3dData qua window thường.`);
                     } else {
                         // Cách 3: "Tiêm thuốc" trực tiếp
                         try {
-                            console.log(`${logPrefix} 💉 Tiêm script cập nhật token trực tiếp vào trang...`);
+                            showNotification(`${logPrefix} 💉 Tiêm script cập nhật token trực tiếp vào trang...`);
                             const script = document.createElement('script');
                             script.textContent = `
-                                try {
-                                    if (typeof hh3dData !== 'undefined') {
-                                        hh3dData.securityToken = "${token}";
-                                        console.log('✅ [Inject] Token đã được cập nhật từ bên trong trang web.');
-                                    }
-                                } catch(e) {}
+                               (function () {
+                                    try {
+                                        if (typeof window.hh3dData !== 'undefined' && window.hh3dData) {
+                                            window.hh3dData.securityToken = ${token};
+                                        } else if (typeof hh3dData !== 'undefined' && hh3dData) {
+                                            hh3dData.securityToken = ${token};
+                                        }
+                                    } catch (e) {}
+                                })();
                             `;
                             (document.head || document.body || document.documentElement).appendChild(script);
                             script.remove();
@@ -6608,11 +6611,11 @@
             let securityToken = null;
             // Cách 1: Lấy từ unsafeWindow (Biến thật của trang web)
             if (typeof hh3dData !== 'undefined' && hh3dData.securityToken) {
-                console.log(`[Hiện Tu vi] ℹ️ Lấy 'security_token' từ biến global thông thường.`);
+                showNotification(`[Hiện Tu vi] ℹ️ Lấy 'security_token' từ biến global thông thường.`);
                 securityToken = hh3dData.securityToken;
             } else // Cách 2: Lấy từ unsafeWindow (Biến của trang web trong môi trường userscript)
                 if (typeof unsafeWindow !== 'undefined' && unsafeWindow.hh3dData && unsafeWindow.hh3dData.securityToken) {
-                console.log(`[Hiện Tu vi] ℹ️ Lấy 'security_token' từ unsafeWindow.`);
+                showNotification(`[Hiện Tu vi] ℹ️ Lấy 'security_token' từ unsafeWindow.`);
                 securityToken = unsafeWindow.hh3dData.securityToken;
             } 
 
