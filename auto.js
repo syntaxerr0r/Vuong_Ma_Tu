@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey
-// @version       5.4.3.1
+// @version       5.4.3.2
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.li/*
@@ -3663,6 +3663,7 @@
                         'Content-Type': 'application/x-www-form-urlencoded',
                         'X-WP-Nonce': this.nonce
                     },
+                    contentType: 'application/x-www-form-urlencoded',
                     body: JSON.stringify({action: 'check_daily_gift_limit',cost_type:`tien_ngoc`,friend_id:`${friendId}`,user_id:`${accountId}`}),
                 });
                 const dataCheckGift = await responseCheckGift.json();
