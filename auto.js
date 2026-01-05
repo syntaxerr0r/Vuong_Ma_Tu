@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey
-// @version       5.4.2
+// @version       5.4.3
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.li/*
@@ -3654,7 +3654,7 @@
                 this.uocNguyen();
                 return;
             }
-            
+            showNotification(this.nonce, 'info', 5000); // Debug nonce
             friendLoop: for (const friendId of friendIdList) {
                 const responseCheckGift = await fetch(this.apiUrl, {
                     method: 'POST',
@@ -3663,7 +3663,7 @@
                         'Content-Type': 'application/x-www-form-urlencoded',
                         'X-WP-Nonce': this.nonce
                     },
-                    body: `action=check_daily_gift_limit&user_id=${accountId}&friend_id=${friendId}&cost_type=tien_ngoc`,
+                    body: JSON.stringify({action: 'check_daily_gift_limit',cost_type:`tien_ngoc`,friend_id:`${friendId}`,user_id:`${accountId}`}),
                 });
                 const dataCheckGift = await responseCheckGift.json();
                 
