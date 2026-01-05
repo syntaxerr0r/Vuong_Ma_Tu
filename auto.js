@@ -6426,18 +6426,8 @@
     class hienTuviKhoangMach {
         constructor() {
             this.selfTuViCache = null;
-            this.mineImageSelector = '.mine-image';
-            this.attackButtonSelector = '.attack-btn';
-            this.currentMineUsers = []; // Sẽ lưu dữ liệu người dùng tại đây
-            this.tempObserver = null; // Biến để lưu MutationObserver tạm thời
             this.nonceGetUserInMine = null;
             this.nonce = null;
-            this.headers = {
-                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-                'X-Requested-With': 'XMLHttpRequest'
-            };
-            this.currentMineId = null;
-            this.tempObserverRearrange = null; // Biến để lưu MutationObserver tạm thời khi sắp xếp
 
             // ✅ Cache data từ hook XHR/fetch
             this._usersCache = new Map(); // Map<mineId, {data, timestamp}>
@@ -6470,6 +6460,8 @@
                                         timestamp: Date.now()
                                     });
                                     console.log(`[Hook XHR] ✅ Đã cache users cho mỏ ${mineId}`);
+                                    self.showTotalEnemies(mineId, data.data)
+                                        .catch(err => console.error('[Hook XHR] ❌ Không thể cập nhật thông tin mỏ:', err));
                                 }
                             }
                         }
@@ -6500,6 +6492,8 @@
                                     timestamp: Date.now()
                                 });
                                 console.log(`[Hook Fetch] ✅ Đã cache users cho mỏ ${mineId}`);
+                                self.showTotalEnemies(mineId, data.data)
+                                    .catch(err => console.error('[Hook Fetch] ❌ Không thể cập nhật thông tin mỏ:', err));
                             }
                         }
                     }
@@ -6566,12 +6560,6 @@
                     resolve(null);
                 }, timeout);
             });
-        }
-        async getNonceGetUserInMine() {
-            const htmlSource = document.documentElement.innerHTML;
-            const regex = /action:\s*'get_users_in_mine',[\s\S]*?security:\s*'([a-f0-9]+)'/;
-            const match = htmlSource.match(regex);
-            return match ? match[1] : null;
         }
 
         async getNonce() {
@@ -6737,50 +6725,6 @@
             btn.insertAdjacentElement('afterend', info);
         }
 
-        /*
-        async getUsersInMine(mineId) {
-            let securityToken = null;
-            // Cách 1: Lấy từ unsafeWindow (Biến thật của trang web)
-            if (typeof hh3dData !== 'undefined' && hh3dData.securityToken) {
-                securityToken = hh3dData.securityToken;
-            } else // Cách 2: Lấy từ unsafeWindow (Biến của trang web trong môi trường userscript)
-                if (typeof unsafeWindow !== 'undefined' && unsafeWindow.hh3dData && unsafeWindow.hh3dData.securityToken) {
-                securityToken = unsafeWindow.hh3dData.securityToken;
-            } 
-
-            if (!this.nonceGetUserInMine || !securityToken) {
-                let errorMsg = 'Lỗi (get_users):';
-                if (!this.nonceGetUserInMine) errorMsg += " Nonce (security) chưa được cung cấp.";
-                if (!securityToken) errorMsg += " Không tìm thấy 'security_token' (hh3dData).";
-
-                showNotification(errorMsg, 'error');
-                return null;
-            }
-
-            const payload = new URLSearchParams({
-                action: 'get_users_in_mine',
-                mine_id: mineId,
-                security_token: securityToken,
-                security: this.nonceGetUserInMine
-            });
-
-            try {
-                const r = await fetch(ajaxUrl, {
-                    method: 'POST',
-                    headers: this.headers,
-                    body: payload,
-                    credentials: 'include'
-                });
-                const d = await r.json();
-
-                return d.success ? d.data : (showNotification(d.data.message, 'error'), null);
-
-            } catch (e) {
-                console.error(`[Hiện Tu vi] ❌ Lỗi mạng (lấy user):`, e);
-                return null;
-            }
-        }
-        */
         async getTuVi(userId) {
             // 0. Chuẩn bị Nonce & Headers
             if (!this.nonce) {
@@ -6974,54 +6918,14 @@
             }
         }
 
-        async addEventListenersToReloadBtn(mineId) {
-            const reloadBtn = document.querySelector('#reload-btn');
-            if (reloadBtn && !reloadBtn.dataset.listenerAdded) {
-                reloadBtn.addEventListener('click', async () => {
-                    this.showTotalEnemies(mineId);
-                });
-                reloadBtn.dataset.listenerAdded = 'true';
-            }
-        }
-
-        async addEventListenersToMines() {
-            const mineImages = document.querySelectorAll(this.mineImageSelector);
-            mineImages.forEach(image => {
-                if (!image.dataset.listenerAdded) {
-                    image.addEventListener('click', async (event) => {
-                        const mineId = event.currentTarget.getAttribute('data-mine-id');
-                        if (mineId) {
-                            // ✅ Không gọi showTotalEnemies ở đây nữa vì showTuVi đã làm rồi
-                            // Chỉ cần thêm listener cho reload button
-                            this.addEventListenersToReloadBtn(mineId);
-                        }
-                    });
-                    image.dataset.listenerAdded = 'true';
-                }
-            });
-        }
-
         async showTuVi(myTuVi) {
             if (!myTuVi) return;
 
             const buttons = document.querySelectorAll('.attack-btn');
             if (buttons.length === 0) return;
 
-            // Lấy mineId từ nút đầu tiên
-            const mineId = buttons[0]?.getAttribute('data-mine-id');
-            
-            // Sắp xếp lại thứ tự hiển thị: Kẻ địch lên đầu (trừ chủ mỏ và bản thân)
-            // Gọi API một lần và tái sử dụng cho cả rearrange và showTotalEnemies
-            let usersData = null;
-            if (mineId && !document.body.dataset.rearranged) {
-                usersData = await this.rearrangeUsersByEnemy(mineId);
-                document.body.dataset.rearranged = mineId; // Đánh dấu đã sắp xếp cho mỏ này
-            }
-
-            // Lấy lại buttons sau khi đã sắp xếp
-            const buttonsAfterRearrange = document.querySelectorAll('.attack-btn');
-            
-            for (const btn of buttonsAfterRearrange) {
+            for (const btn of buttons) {
+                // Bỏ qua nếu đã xử lý
                 if (btn.dataset.tuviAttached === '1') continue;
                 btn.dataset.tuviAttached = '1';
 
@@ -7031,116 +6935,18 @@
                 try {
                     const opponentTuVi = await this.getTuVi(userId);
                     if (opponentTuVi) {
-                        const rate = this.winRate(myTuVi, opponentTuVi).toFixed(2);
                         this.upsertTuViInfo(btn, userId, opponentTuVi, myTuVi);
                     } else {
-                        await new Promise(r => setTimeout(r, 500))
+                        // Nếu không lấy được Tu Vi, thử lấy cảnh giới
+                        await new Promise(r => setTimeout(r, 500));
                         this.upsertTierInfo(btn, userId);
                     }
                 } catch (e) {
-                    console.error('getTuVi error', e);
+                    console.error('[Hiện Tu Vi] ❌ Lỗi getTuVi:', e);
                 }
 
-                if (mineId && mineId !== this.currentMineId) {
-                    this.currentMineId = mineId;
-                    this.showTotalEnemies(mineId, usersData); // Tái sử dụng usersData đã lấy
-                    this.addEventListenersToReloadBtn(mineId);
-                }
-                // nghỉ 1s tránh spam
+                // Nghỉ 1s tránh spam API
                 await new Promise(r => setTimeout(r, 1000));
-            }
-        }
-
-        /**
-         * Sắp xếp lại các user trong mỏ: đưa kẻ địch lên đầu (trừ chủ mỏ vị trí 0 và bản thân)
-         * @param {string} mineId - ID của mỏ
-         * @param {object} usersData - (Tùy chọn) Dữ liệu users đã lấy sẵn, tránh gọi API lại
-         * @returns {object|null} Trả về data users để tái sử dụng
-         */
-        async rearrangeUsersByEnemy(mineId, usersData = null) {
-            try {
-                // Nếu đã có data thì dùng luôn, không cần gọi API lại
-                const data = usersData || await this.getUsersInMine(mineId);
-                if (!data || !data.users || data.users.length === 0) return null;
-
-                const users = data.users;
-                
-                // Tạo map userId -> user data để tra cứu nhanh
-                const userMap = new Map();
-                users.forEach(u => userMap.set(String(u.id), u));
-
-                // Lấy container chứa các user (thường là parent của các attack-btn)
-                const buttons = document.querySelectorAll('.attack-btn');
-                if (buttons.length === 0) return data;
-
-                // Tìm container cha chung của các user items
-                const firstBtn = buttons[0];
-                const userContainer = firstBtn.closest('.batquai-item')?.parentElement 
-                                   || firstBtn.closest('[class*="user"]')?.parentElement
-                                   || firstBtn.parentElement?.parentElement;
-                
-                if (!userContainer) return data;
-
-                // Lấy tất cả các user items (phần tử con trực tiếp chứa attack-btn)
-                const userItems = Array.from(userContainer.children).filter(el => 
-                    el.querySelector('.attack-btn')
-                );
-
-                if (userItems.length <= 1) return data;
-
-                // Lấy accountId của bản thân
-                const selfId = String(accountId);
-                
-                // Xác định chủ mỏ (vị trí đầu tiên trong danh sách API)
-                const ownerId = users.length > 0 ? String(users[0].id) : null;
-
-                // Phân loại các items
-                const ownerItem = []; // Chủ mỏ - giữ nguyên vị trí đầu
-                const selfItem = [];  // Bản thân - giữ nguyên vị trí
-                const enemyItems = []; // Kẻ địch - đưa lên sau chủ mỏ
-                const allyItems = [];  // Đồng minh/Liên minh - xuống cuối
-
-                for (const item of userItems) {
-                    const btn = item.querySelector('.attack-btn');
-                    const userId = btn?.getAttribute('data-user-id');
-                    
-                    if (!userId) {
-                        allyItems.push(item);
-                        continue;
-                    }
-
-                    const userData = userMap.get(userId);
-                    
-                    if (userId === ownerId) {
-                        // Chủ mỏ - giữ đầu
-                        ownerItem.push(item);
-                    } else if (userId === selfId) {
-                        // Bản thân - giữ nguyên (sẽ để sau chủ mỏ)
-                        selfItem.push(item);
-                    } else if (userData && !userData.dong_mon && !userData.lien_minh) {
-                        // Kẻ địch - đưa lên đầu (sau chủ mỏ và bản thân)
-                        enemyItems.push(item);
-                    } else {
-                        // Đồng môn/Liên minh - xuống cuối
-                        allyItems.push(item);
-                    }
-                }
-
-                // Sắp xếp lại: Chủ mỏ -> Bản thân -> Kẻ địch -> Đồng minh
-                const newOrder = [...ownerItem, ...selfItem, ...enemyItems, ...allyItems];
-
-                // Chèn lại các items theo thứ tự mới
-                for (const item of newOrder) {
-                    userContainer.appendChild(item);
-                }
-
-                console.log(`[Hiện Tu Vi] ✅ Đã sắp xếp lại: ${enemyItems.length} kẻ địch lên đầu`);
-
-                return data; // ✅ Trả về data để tái sử dụng
-
-            } catch (e) {
-                console.error('[Hiện Tu Vi] ❌ Lỗi sắp xếp users:', e);
-                return null;
             }
         }
 
@@ -7148,32 +6954,27 @@
             if (document.readyState === 'loading') {
                 await new Promise(resolve => document.addEventListener('DOMContentLoaded', resolve, { once: true }));
             }
-            this.nonceGetUserInMine = await this.getNonceGetUserInMine();
+            
+            // Lấy nonce để sử dụng cho các API calls
             this.nonce = await this.getNonce();
             await this.waitForElement('#head_manage_acc', 15000);
 
             const myTuVi = await this.getSelfTuVi();
-            if (myTuVi) {
-                await this.showTuVi(myTuVi);
+            if (!myTuVi) {
+                console.warn('[Hiện Tu Vi] ⚠️ Không lấy được Tu Vi của bản thân');
+                return;
             }
 
-            // quan sát DOM để cập nhật khi các nút attack xuất hiện hoặc nội dung thay đổi
-            let __timeout = null;
+            // Hiển thị Tu Vi cho các nút attack hiện có
+            await this.showTuVi(myTuVi);
+
+            // Quan sát DOM để cập nhật khi có nút attack mới
+            let debounceTimeout = null;
             const observer = new MutationObserver(() => {
-                clearTimeout(__timeout);
-                __timeout = setTimeout(async () => {
-                    await this.showTuVi(myTuVi);
-                }, 200);
+                clearTimeout(debounceTimeout);
+                debounceTimeout = setTimeout(() => this.showTuVi(myTuVi), 300);
             });
             observer.observe(document.body, { childList: true, subtree: true });
-
-            this.addEventListenersToMines();
-            // MutationObserver chính để thêm listener cho các mỏ mới
-            const mainObserver = new MutationObserver(() => {
-                this.addEventListenersToMines();
-            });
-
-            mainObserver.observe(document.body, { childList: true, subtree: true });
         }
     }
  
