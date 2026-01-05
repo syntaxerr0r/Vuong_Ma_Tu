@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey
-// @version       5.4
+// @version       5.4.2
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.li/*
@@ -122,44 +122,15 @@
     async function getSecurityToken(url) {
         const logPrefix = "[SecurityTokenFetcher]";
         console.log(`${logPrefix} ▶️ Bắt đầu lấy security token từ ${url || 'trang hiện tại'}...`);
-
-        // ✅ LOGIC MỚI: nếu url là trang hiện tại (include) thì lấy từ biến trước, không fetch
-        const isCurrentPage = !url || window.location.href.includes(url);
-        if (isCurrentPage) {
-            try {
-                if (typeof unsafeWindow !== 'undefined' && unsafeWindow.hh3dData?.securityToken) {
-                    console.log(`${logPrefix} ✅ Lấy token từ unsafeWindow.hh3dData (không fetch).`);
-                    return String(unsafeWindow.hh3dData.securityToken);
-                }
-            } catch (e) {}
-
-            try {
-                if (window.hh3dData?.securityToken) {
-                    console.log(`${logPrefix} ✅ Lấy token từ window.hh3dData (không fetch).`);
-                    return String(window.hh3dData.securityToken);
-                }
-            } catch (e) {}
-
-            try {
-                // eslint-disable-next-line no-undef
-                if (typeof hh3dData !== 'undefined' && hh3dData?.securityToken) {
-                    console.log(`${logPrefix} ✅ Lấy token từ hh3dData (không fetch).`);
-                    // eslint-disable-next-line no-undef
-                    return String(hh3dData.securityToken);
-                }
-            } catch (e) {}
-        }
-
         let htmlContent = null;
 
         try {
-            // 1. Lấy nội dung HTML
-            //    - Nếu KHÔNG phải trang hiện tại và có url -> fetch
-            //    - Còn lại -> đọc HTML của trang hiện tại
-            if (url && !isCurrentPage) {
+            // 1. Lấy nội dung HTML (Fetch hoặc quét trang hiện tại)
+            if (url) {
                 const response = await fetch(url);
                 if (!response.ok) {
                     console.error(`${logPrefix} ❌ Fetch thất bại với status: ${response.status}`);
+                    // Chỉ mở tab mới khi lỗi 403 (Forbidden - phiên hết hạn/chưa đăng nhập)
                     if (response.status === 403) {
                         console.error(`${logPrefix} 🚨 Lỗi 403 Forbidden. Đang mở tab mới...`);
                         window.open(url, '_blank');
@@ -179,33 +150,39 @@
             if (match && match[1]) {
                 const token = match[1];
 
-                // ✅ Chỉ cập nhật Global State khi đang ở trang hiện tại
+                // 🔥 LOGIC MỚI: Kiểm tra xem URL yêu cầu có phải là trang hiện tại không, bằng cách kiểm tra trang hiện tại có bao gồm không
+                // Nếu không truyền URL (!url) -> Mặc định là trang hiện tại
+                // Nếu có URL -> Phải trùng khớp với window.location.href
+                const isCurrentPage = !url || (window.location.href.includes(url));
+
                 if (isCurrentPage) {
                     console.log(`${logPrefix} 🎯 URL trùng khớp trang hiện tại. Tiến hành cập nhật Global State...`);
 
+                    // ============================================================
+                    // 🔥 SỬA LỖI: CẬP NHẬT XUYÊN SANDBOX
+                    // ============================================================
+
+                    // Cách 1: Dùng unsafeWindow (Cách chuẩn của Tampermonkey)
                     if (typeof unsafeWindow !== 'undefined' && unsafeWindow.hh3dData) {
                         unsafeWindow.hh3dData.securityToken = token;
                         console.log(`${logPrefix} 🔓 Đã cập nhật hh3dData thông qua unsafeWindow.`);
                     }
+                    // Cách 2: Fallback nếu không có unsafeWindow
                     else if (typeof window.hh3dData !== 'undefined') {
                         window.hh3dData.securityToken = token;
                         console.log(`${logPrefix} ⚠️ Đã cập nhật hh3dData qua window thường.`);
                     } else {
-                        // Cách 3: "Tiêm thuốc" trực tiếp (giữ nguyên cấu trúc, chỉ sửa cách nhúng token cho khỏi vỡ cú pháp)
+                        // Cách 3: "Tiêm thuốc" trực tiếp
                         try {
                             console.log(`${logPrefix} 💉 Tiêm script cập nhật token trực tiếp vào trang...`);
                             const script = document.createElement('script');
-                            const tokenLiteral = JSON.stringify(token);
                             script.textContent = `
-                               (function () {
-                                    try {
-                                        if (typeof window.hh3dData !== 'undefined' && window.hh3dData) {
-                                            window.hh3dData.securityToken = ${tokenLiteral};
-                                        } else if (typeof hh3dData !== 'undefined' && hh3dData) {
-                                            hh3dData.securityToken = ${tokenLiteral};
-                                        }
-                                    } catch (e) {}
-                                })();
+                                try {
+                                    if (typeof hh3dData !== 'undefined') {
+                                        hh3dData.securityToken = "${token}";
+                                        console.log('✅ [Inject] Token đã được cập nhật từ bên trong trang web.');
+                                    }
+                                } catch(e) {}
                             `;
                             (document.head || document.body || document.documentElement).appendChild(script);
                             script.remove();
@@ -213,13 +190,16 @@
                             console.warn(`${logPrefix} Lỗi tiêm script:`, injectErr);
                         }
                     }
+                    // ============================================================
                 } else {
+                    //  - Token chỉ được trả về cho hàm gọi, không ảnh hưởng trang hiện tại
                     console.log(`${logPrefix} 🛑 Token lấy từ URL khác (${url}). KHÔNG cập nhật hh3dData của trang này.`);
                 }
 
                 return token;
             }
-
+            
+            // Không tìm thấy token trong HTML
             console.error(`${logPrefix} ❌ Không tìm thấy securityToken trong HTML.`);
             return null;
 
@@ -264,38 +244,29 @@
      * @returns {Promise<string|null>} Trả về security nonce nếu tìm thấy, ngược lại trả về null.
      */
     async function getSecurityNonce(url, regex) {
+        // Sử dụng một tiền tố log cố định cho đơn giản
         const logPrefix = '[HH3D Auto]';
 
-        // ✅ LOGIC MỚI: nếu url là trang hiện tại (include) thì đọc DOM, không fetch
-        const isCurrentPage = !url || window.location.href.includes(url);
-
-        console.log(`${logPrefix} ▶️ Đang lấy security nonce từ ${url || 'trang hiện tại'}...`);
-
+        console.log(`${logPrefix} ▶️ Đang tải trang từ ${url} để lấy security nonce...`);
         try {
-            let html = '';
-
-            if (isCurrentPage) {
-                // Đọc HTML từ DOM hiện tại, không cần fetch
-                html = document.documentElement.outerHTML;
-                console.log(`${logPrefix} 📄 Đọc HTML từ DOM (không fetch).`);
-            } else {
-                // Fetch từ URL khác
-                const response = await fetch(url);
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                html = await response.text();
+            const response = await fetch(url);
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
             }
+            const html = await response.text();
 
             // 🔥 CẬP NHẬT: Trích xuất và cập nhật securityToken nếu có trong HTML
             const tokenRegex = /"securityToken"\s*:\s*"([^"]+)"/;
             const tokenMatch = html.match(tokenRegex);
             if (tokenMatch && tokenMatch[1]) {
                 const token = tokenMatch[1];
-                console.log(`${logPrefix} 🔑 Phát hiện securityToken trong HTML, đang cập nhật...`);
+                console.log(`${logPrefix} 🔑 Phát hiện securityToken mới trong HTML, đang cập nhật...`);
 
-                // Chỉ cập nhật global state khi đang ở trang hiện tại
+                // Kiểm tra URL có phải trang hiện tại không
+                const isCurrentPage = window.location.href.includes(url);
+
                 if (isCurrentPage) {
+                    // Cập nhật xuyên sandbox giống getSecurityToken
                     if (typeof unsafeWindow !== 'undefined' && unsafeWindow.hh3dData) {
                         unsafeWindow.hh3dData.securityToken = token;
                         console.log(`${logPrefix} 🔓 Đã cập nhật hh3dData.securityToken thông qua unsafeWindow.`);
@@ -306,17 +277,13 @@
                         // Tiêm script trực tiếp
                         try {
                             const script = document.createElement('script');
-                            const tokenLiteral = JSON.stringify(token);
                             script.textContent = `
-                                (function () {
-                                    try {
-                                        if (typeof window.hh3dData !== 'undefined' && window.hh3dData) {
-                                            window.hh3dData.securityToken = ${tokenLiteral};
-                                        } else if (typeof hh3dData !== 'undefined' && hh3dData) {
-                                            hh3dData.securityToken = ${tokenLiteral};
-                                        }
-                                    } catch (e) {}
-                                })();
+                                try {
+                                    if (typeof hh3dData !== 'undefined') {
+                                        hh3dData.securityToken = "${token}";
+                                        console.log('✅ [Inject] Token đã được cập nhật từ getSecurityNonce.');
+                                    }
+                                } catch(e) {}
                             `;
                             (document.head || document.body || document.documentElement).appendChild(script);
                             script.remove();
