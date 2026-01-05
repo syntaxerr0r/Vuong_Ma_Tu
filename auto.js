@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey
-// @version       5.4.3.2
+// @version       5.4.3.3
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.li/*
@@ -3654,22 +3654,21 @@
                 this.uocNguyen();
                 return;
             }
-            showNotification(this.nonce, 'info', 5000); // Debug nonce
+            
             friendLoop: for (const friendId of friendIdList) {
                 const responseCheckGift = await fetch(this.apiUrl, {
                     method: 'POST',
                     credentials: 'include',
                     headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'Content-Type': 'application/json',
                         'X-WP-Nonce': this.nonce
                     },
-                    contentType: 'application/x-www-form-urlencoded',
                     body: JSON.stringify({action: 'check_daily_gift_limit',cost_type:`tien_ngoc`,friend_id:`${friendId}`,user_id:`${accountId}`}),
                 });
                 const dataCheckGift = await responseCheckGift.json();
                 
                 // Debug cho Safari - hiển thị remaining_free_gifts
-                showNotification(`[Debug] Response: ${JSON.stringify(dataCheckGift)}`, 'info', 10000);
+                showNotification(JSON.stringify(dataCheckGift), 'info', 5000);
                 showNotification(`[Debug] ID: ${friendId}, remaining: ${dataCheckGift.remaining_free_gifts}, success: ${dataCheckGift.success}`, 'info', 5000);
                 
                 if (dataCheckGift.success === false || dataCheckGift.tien_ngoc_available === false) {
