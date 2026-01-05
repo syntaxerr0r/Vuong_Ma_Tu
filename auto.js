@@ -3646,64 +3646,78 @@
         //Tặng hoa
         async tangHoa() {
             const friendIds = localStorage.getItem(`tienDuyenInputValue_${accountId}`) || '';
-            const friendIdList = friendIds.split(';');
+            const friendIdList = friendIds.split(';').filter(id => id.trim()); // Lọc bỏ empty strings
             let count = 0;
+            
+            if (friendIdList.length === 0) {
+                showNotification('Chưa có danh sách bạn bè để tặng hoa', 'warn');
+                this.uocNguyen();
+                return;
+            }
+            
             friendLoop: for (const friendId of friendIdList) {
-                if (friendId) {
-                    const responseCheckGift = await fetch(weburl + '/wp-json/hh3d/v1/action', {
+                const responseCheckGift = await fetch(this.apiUrl, {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'X-WP-Nonce': this.nonce
+                    },
+                    body: `action=check_daily_gift_limit&user_id=${accountId}&friend_id=${friendId}&cost_type=tien_ngoc`,
+                });
+                const dataCheckGift = await responseCheckGift.json();
+                
+                // Debug cho Safari - hiển thị remaining_free_gifts
+                showNotification(`[Debug] ID: ${friendId}, remaining: ${dataCheckGift.remaining_free_gifts}, success: ${dataCheckGift.success}`, 'info', 5000);
+                
+                if (dataCheckGift.success === false || dataCheckGift.tien_ngoc_available === false) {
+                    showNotification(dataCheckGift.message, 'error');
+                    continue;
+                }
+                if (dataCheckGift.message === "Đạo hữu đã gửi quà cho tối đa 5 người bạn khác nhau trong ngày hôm nay! Hãy thử lại vào ngày mai.") {
+                    showNotification(dataCheckGift.message, 'error');
+                    taskTracker.markTaskDone(accountId, 'tienduyen');
+                    break friendLoop;
+                }
+                if (dataCheckGift.message === 'Đã đạt giới hạn tặng bằng Tiên Ngọc cho người này hôm nay.') {
+                    count++;
+                }
+                
+                // Tặng hoa - kiểm tra remaining_free_gifts có hợp lệ không
+                const remainingGifts = parseInt(dataCheckGift.remaining_free_gifts) || 0;
+                for (let i = 0; i < remainingGifts; i++) {
+                    const response = await fetch(this.apiUrl, {
                         method: 'POST',
                         credentials: 'include',
                         headers: {
                             'Content-Type': 'application/x-www-form-urlencoded',
-                            'X-Wp-Nonce': this.nonce
-                        },
-                        body: `action=check_daily_gift_limit&user_id=${accountId}&friend_id=${friendId}&cost_type=tien_ngoc`,
-                    });
-                    const dataCheckGift = await responseCheckGift.json();
-                    if (dataCheckGift.success === false || dataCheckGift.tien_ngoc_available === false) {
-                        showNotification(dataCheckGift.message, 'error');
-                        continue;
-                    }
-                    if (dataCheckGift.message === "Đạo hữu đã gửi quà cho tối đa 5 người bạn khác nhau trong ngày hôm nay! Hãy thử lại vào ngày mai.") {
-                        showNotification(dataCheckGift.message, 'error');
-                        taskTracker.markTaskDone(accountId, 'tienduyen');
-                        break friendLoop;
-                    }
-                    if (dataCheckGift.message === 'Đã đạt giới hạn tặng bằng Tiên Ngọc cho người này hôm nay.') {
-                        count++;
-                    }
-                    // Tặng hoa 3 lần hoặc tối đa số hoa còn lại
-                    for (let i = 0; i < dataCheckGift.remaining_free_gifts; i++) {
-                        const response = await fetch(weburl + '/wp-json/hh3d/v1/action', {
-                        method: 'POST',
-                        credentials: 'include',
-                        headers: {
-                            'Content-Type': 'application/x-www-form-urlencoded',
-                            'X-Wp-Nonce': this.nonce
+                            'X-WP-Nonce': this.nonce
                         },
                         body: `action=gift_to_friend&cost_type=tien_ngoc&friend_id=${friendId}&gift_type=hoa_hong`,
-                        });
-                        const data = await response.json();
-                        if (data.success) {
-                            showNotification(data.message, 'success');
-                            if (i === dataCheckGift.remaining_free_gifts - 1) { count++; }
-                        } else {
-                            showNotification(data.message, 'error');
-                            if (data.message === "Đạo hữu đã gửi quà cho tối đa 5 người bạn khác nhau trong ngày hôm nay! Hãy thử lại vào ngày mai.") {
-                                taskTracker.markTaskDone(accountId, 'tienduyen');
-                                break friendLoop;
-                            }
+                    });
+                    const data = await response.json();
+                    if (data.success) {
+                        showNotification(data.message, 'success');
+                        if (i === remainingGifts - 1) { count++; }
+                    } else {
+                        showNotification(data.message, 'error');
+                        if (data.message === "Đạo hữu đã gửi quà cho tối đa 5 người bạn khác nhau trong ngày hôm nay! Hãy thử lại vào ngày mai.") {
+                            taskTracker.markTaskDone(accountId, 'tienduyen');
+                            break friendLoop;
                         }
-                        await new Promise(r => setTimeout(r, 300));
                     }
-                    showNotification(`Đã tặng hoa cho bạn bè: ${count}`, 'info');
-                    if (count >= 5) {
-                        taskTracker.markTaskDone(accountId, 'tienduyen');
-                        break friendLoop;
-                    }; // Chỉ tặng hoa cho tối đa 5 bạn bè
                     await new Promise(r => setTimeout(r, 300));
                 }
+                
+                if (count >= 5) {
+                    taskTracker.markTaskDone(accountId, 'tienduyen');
+                    break friendLoop;
+                }
+                await new Promise(r => setTimeout(r, 300));
             }
+            
+            // Thông báo kết quả cuối cùng (CHỈ 1 LẦN)
+            showNotification(`Đã tặng hoa cho ${count} bạn bè`, 'info');
             this.uocNguyen();
         }
 
