@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey
-// @version       5.4.3.3
+// @version       5.4.3
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.li/*
@@ -3667,10 +3667,6 @@
                 });
                 const dataCheckGift = await responseCheckGift.json();
                 
-                // Debug cho Safari - hiển thị remaining_free_gifts
-                showNotification(JSON.stringify(dataCheckGift), 'info', 5000);
-                showNotification(`[Debug] ID: ${friendId}, remaining: ${dataCheckGift.remaining_free_gifts}, success: ${dataCheckGift.success}`, 'info', 5000);
-                
                 if (dataCheckGift.success === false || dataCheckGift.tien_ngoc_available === false) {
                     showNotification(dataCheckGift.message, 'error');
                     continue;
@@ -3691,10 +3687,10 @@
                         method: 'POST',
                         credentials: 'include',
                         headers: {
-                            'Content-Type': 'application/x-www-form-urlencoded',
+                            'Content-Type': 'application/json',
                             'X-WP-Nonce': this.nonce
                         },
-                        body: `action=gift_to_friend&cost_type=tien_ngoc&friend_id=${friendId}&gift_type=hoa_hong`,
+                        body: JSON.stringify({action: 'gift_to_friend', cost_type: 'tien_ngoc', friend_id: friendId, gift_type: 'hoa_hong'}),
                     });
                     const data = await response.json();
                     if (data.success) {
