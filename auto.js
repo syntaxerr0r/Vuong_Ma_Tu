@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey
-// @version       5.4.4
+// @version       5.4.4.1
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.li/*
@@ -3667,6 +3667,10 @@
                 });
                 const dataCheckGift = await responseCheckGift.json();
                 
+                // Kiểm tra phản hồi
+                showNotification(dataCheckGift, 'info');
+
+
                 if (dataCheckGift.success === false || dataCheckGift.tien_ngoc_available === false) {
                     showNotification(dataCheckGift.message, 'error');
                     continue;
