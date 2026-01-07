@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey
-// @version       5.3
+// @version       5.4.4
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.li/*
@@ -2232,6 +2232,7 @@
         };
 
         async getAllMines() {
+            const mineTypes = ['gold', 'silver', 'copper'];
             const cacheKey = "HH3D_allMines";
             const cacheRaw = localStorage.getItem(cacheKey);
 
@@ -2239,7 +2240,11 @@
             if (cacheRaw && cacheRaw.length > 0) {
                 try {
                     const cache = JSON.parse(cacheRaw);
-                    if (Date.now() < cache.expiresAt && cache.data && cache.data.length > 0) {
+                    // Chỉ dùng cache nếu còn hạn VÀ đủ 3 loại mỏ
+                    const cacheTypes = new Set((cache?.data || []).map(m => String(m?.type || '')));
+                    const cacheHasAllTypes = mineTypes.every(t => cacheTypes.has(t));
+
+                    if (Date.now() < cache.expiresAt && cache.data && cache.data.length > 0 && cacheHasAllTypes) {
                         console.log("[HH3D] 🗄️ Dùng dữ liệu mỏ từ cache");
                         return {
                             optionsHtml: cache.optionsHtml,
@@ -2263,11 +2268,11 @@
                 return { optionsHtml: '', minesData: [] };
             }
 
-            const mineTypes = ['gold', 'silver', 'copper'];
-            const allMines = [];
+            // --- Load từng loại + kiểm tra đủ 3 loại ---
+            const minesByType = new Map();
+            const missingTypes = new Set(mineTypes);
 
-            // Tải song song cho nhanh
-            const requests = mineTypes.map(async type => {
+            const fetchMinesByType = async (type) => {
                 const payload = new URLSearchParams({
                     action: 'load_mines_by_type',
                     mine_type: type,
@@ -2283,20 +2288,46 @@
                     });
                     const d = await r.json();
 
-                    if (d.success) {
-                        d.data.forEach(mine => {
-                            mine.type = type;
-                            allMines.push(mine);
-                        });
-                    } else {
-                        showNotification(d.message || `Lỗi tải mỏ loại ${type}.`, 'error');
+                    if (d && d.success && Array.isArray(d.data)) {
+                        const typed = d.data.map(mine => ({ ...mine, type }));
+                        minesByType.set(type, typed);
+                        missingTypes.delete(type);
+                        return true;
                     }
+
+                    showNotification((d && (d.message || d?.data?.message)) || `Lỗi tải mỏ loại ${type}.`, 'error');
+                    return false;
                 } catch (e) {
                     console.error(`${this.logPrefix} ❌ Lỗi mạng (tải mỏ ${type}):`, e);
+                    return false;
                 }
+            };
+
+            const loadTypes = async (typesToLoad) => {
+                await Promise.all((typesToLoad || []).map(t => fetchMinesByType(t)));
+            };
+
+            // 1) Load lần đầu
+            await loadTypes(mineTypes);
+
+            // 2) Retry loại bị thiếu (tối đa 2 lần)
+            for (let attempt = 1; attempt <= 2 && missingTypes.size > 0; attempt++) {
+                const retryTypes = Array.from(missingTypes);
+                console.warn(`${this.logPrefix} ⚠️ getAllMines thiếu loại: ${retryTypes.join(', ')}. Retry lần ${attempt}/2...`);
+                await this.delay(500 * attempt);
+                await loadTypes(retryTypes);
+            }
+
+            const allMines = [];
+            mineTypes.forEach(t => {
+                const arr = minesByType.get(t);
+                if (arr && arr.length) allMines.push(...arr);
             });
 
-            await Promise.all(requests);
+            if (missingTypes.size > 0) {
+                const missing = Array.from(missingTypes);
+                showNotification(`Chưa tải đủ 3 loại mỏ. Thiếu: ${missing.join(', ')}. (Không cache dữ liệu thiếu)`, 'error');
+            }
 
             // --- Sắp xếp ---
             allMines.sort((a, b) => {
@@ -2324,11 +2355,14 @@
             const expiresAt = expireDate.getTime();
 
             // --- Lưu cache ---
-            localStorage.setItem(cacheKey, JSON.stringify({
-                data: allMines,
-                optionsHtml: mineOptionsHtml,
-                expiresAt
-            }));
+            // Chỉ cache khi đã đủ 3 loại mỏ
+            if (missingTypes.size === 0) {
+                localStorage.setItem(cacheKey, JSON.stringify({
+                    data: allMines,
+                    optionsHtml: mineOptionsHtml,
+                    expiresAt
+                }));
+            }
 
             return {
                 optionsHtml: mineOptionsHtml,
@@ -2397,7 +2431,7 @@
                 return false;
             }
         }
-
+        
         async getUsersInMine(mineId) {
 
             // --- 1. Lấy 'security' nonce (giữ logic cache của bạn) ---
@@ -2414,6 +2448,8 @@
                     this.getUsersInMineNonce = nonce; // lưu lại để dùng lần sau
                 }
             }
+
+            //Nếu page hiện tại là khoáng mạch thì lấy thẳng token từ đó
             this.securityToken = await getSecurityToken(this.khoangMachUrl);
             // --- 3. Kiểm tra cả hai token ---
             if (!nonce || !this.securityToken) {
@@ -2524,6 +2560,14 @@
 
 
         async attackUser(userId, mineId) {
+            // ✅ Kiểm tra cooldown: không cho tấn công cách nhau dưới 5500ms
+            const now = Date.now();
+            if (this._lastAttackTime && (now - this._lastAttackTime) < 5500) {
+                const remaining = Math.ceil((5500 - (now - this._lastAttackTime)) / 1000);
+                showNotification(`Vui lòng chờ ${remaining}s trước khi tấn công tiếp.`, 'warn');
+                return false;
+            }
+
             const security= await this.#getNonce(/action:\s*'attack_user_in_mine'[\s\S]*?security:\s*'([a-f0-9]+)'/);
             const securityToken = await getSecurityToken(this.khoangMachUrl);
             if (!security ) {
@@ -2535,6 +2579,7 @@
                 const r = await fetch(this.ajaxUrl, { method: 'POST', headers: this.headers, body: payload, credentials: 'include' });
                 const d = await r.json();
                 if (d.success) {
+                    this._lastAttackTime = Date.now(); // ✅ Ghi lại thời điểm tấn công thành công
                     showNotification(d.data.message || 'Đã tấn công người chơi.', 'success');
                     return true;
                 } else {
@@ -2917,30 +2962,39 @@
                 minesData = minesData.map(m => ({
                     ...m,
                     users: (m.users || []).map(u => ({
-                        // Map key ngắn (i, n, t, r) -> key dài (id, name...)
+                        // Map key ngắn (i, n, t, r, d, l) -> key dài (id, name...)
                         id: u.i || u.id,                     
                         name: u.n || u.name,
                         tongMonName: u.t || u.tongMonName,
                         role: u.r || u.role,
+                        dong_mon: u.d === 1 || u.dong_mon,   // d = dong_mon
+                        lien_minh: u.l === 1 || u.lien_minh, // l = lien_minh
                         ...u 
                     }))
                 }));
             }
 
-            // 3. Lọc & Hiển thị (Giữ nguyên)
+            // 3. Lọc & Hiển thị
             const results = [];
             for (const mine of minesData) {
                 if (!mine.users) continue;
                 for (const u of mine.users) {
                     const uid = String(u.id ?? '').trim();
                     const uTong = String(u.tongMonName || '').trim();
-                    if (enemySet.has(uid) || tongNameSet.has(uTong)) {
+                    
+                    // ✅ Kiểm tra xem có phải kẻ địch theo ID hoặc Tông Môn
+                    const isTargetById = enemySet.has(uid);
+                    const isTargetByTong = tongNameSet.has(uTong);
+                    
+                    if (isTargetById || isTargetByTong) {
                         results.push({
                             ...u,
                             mineId: mine.id,
                             mineName: mine.name,
                             tongMonName: u.tongMonName,
-                            role: u.role
+                            role: u.role,
+                            dong_mon: u.dong_mon,      // Đảm bảo truyền xuống UI
+                            lien_minh: u.lien_minh     // Đảm bảo truyền xuống UI
                         });
                     }
                 }
@@ -2958,7 +3012,7 @@
                 console.log(`${this.logPrefix} 🕵️ Bắt đầu quét toàn bộ mỏ (Mode: Raw Data)...`);
 
                 // Nếu có UI truyền xuống, báo cáo ngay
-                if (onProgress) onProgress(0, 'Đang chuẩn bị dữ liệu...');
+                if (onProgress) onProgress(0, 'Đang chuẩn bị...');
 
                 // --- BƯỚC 1: LẤY DANH SÁCH MỎ & LỌC ---
                 const allMines = await this.getAllMines();
@@ -3036,7 +3090,9 @@
                                     i: u.id,                                // i = id
                                     n: u.name,                              // n = name
                                     t: String(extra.tongMonName || '').trim(), // t = tongMon
-                                    r: extra.role                           // r = role
+                                    r: extra.role,                          // r = role
+                                    d: u.dong_mon ? 1 : 0,                  // d = dong_mon (1/0 để tiết kiệm dung lượng)
+                                    l: u.lien_minh ? 1 : 0                  // l = lien_minh
                                 };
                             });
 
@@ -3215,22 +3271,26 @@
                             </div>
                             
                             <div id="m-${mine.id}" class="mine-content" style="display: none; padding: 5px 10px; background: #151515; border-top: 1px solid #333;">
-                                ${mine.users.map(u => `
+                                ${mine.users.map(u => {
+                                    const isAlly = u.dong_mon || u.lien_minh;
+                                    const allyLabel = u.dong_mon ? '☯️ Đồng Môn' : (u.lien_minh ? '🤝 Liên Minh' : '');
+                                    const nameColor = isAlly ? '#4caf50' : '#ff6b6b'; // Xanh lá nếu là đồng minh
+                                    return `
                                     <div style="padding: 6px 0; border-bottom: 1px dashed #333; display: flex; justify-content: space-between; align-items: center;">
                                         <div style="flex: 1;">
-                                            <div style="color: #ff6b6b; font-weight: 500;">${esc(u.name)}</div>
+                                            <div style="color: ${nameColor}; font-weight: 500;">${esc(u.name)} ${allyLabel ? `<span style="font-size: 10px;">${allyLabel}</span>` : ''}</div>
                                             <div style="font-size: 11px; color: #777;">${esc(u.tongMonName || 'Vô phái')} - ${esc(u.role || 'Thành viên')}</div>
                                         </div>
                                         
                                         <div style="text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
-                                            <div style="display: flex; gap: 5px;">
-                                                <button class="btn-check-tuvi" data-uid="${u.id}" style="border:none; background: #039be5; color: white; border-radius: 3px; padding: 3px 8px; font-size: 11px; cursor: pointer; font-weight: bold;">👁</button>
+                                            ${isAlly ? '' : `<div style="display: flex; gap: 5px;">
+                                                <button class="btn-check-tuvi" data-uid="${u.id}" data-ally="${isAlly ? '1' : '0'}" style="border:none; background: #039be5; color: white; border-radius: 3px; padding: 3px 8px; font-size: 11px; cursor: pointer; font-weight: bold;">👁</button>
                                                 <button class="btn-attack" data-uid="${u.id}" data-mid="${mine.id}" style="border:none; background: #d32f2f; color: white; border-radius: 3px; padding: 3px 8px; font-size: 11px; cursor: pointer; font-weight: bold;">👊</button>
                                             </div>
-                                            <div id="info-res-${u.id}" style="font-size: 10px; color: #b0bec5; min-height: 14px;"></div>
+                                            <div id="info-res-${u.id}" style="font-size: 10px; color: #b0bec5; min-height: 14px;"></div>`}
                                         </div>
                                     </div>
-                                `).join('')}
+                                `}).join('')}
                             </div>
                         </div>
                         `;
@@ -3586,64 +3646,75 @@
         //Tặng hoa
         async tangHoa() {
             const friendIds = localStorage.getItem(`tienDuyenInputValue_${accountId}`) || '';
-            const friendIdList = friendIds.split(';');
+            const friendIdList = friendIds.split(';').filter(id => id.trim()); // Lọc bỏ empty strings
             let count = 0;
+            
+            if (friendIdList.length === 0) {
+                showNotification('Chưa có danh sách bạn bè để tặng hoa', 'warn');
+                this.uocNguyen();
+                return;
+            }
+            
             friendLoop: for (const friendId of friendIdList) {
-                if (friendId) {
-                    const responseCheckGift = await fetch(weburl + '/wp-json/hh3d/v1/action', {
+                const responseCheckGift = await fetch(this.apiUrl, {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-WP-Nonce': this.nonce
+                    },
+                    body: JSON.stringify({action: 'check_daily_gift_limit',cost_type:`tien_ngoc`,friend_id:`${friendId}`,user_id:`${accountId}`}),
+                });
+                const dataCheckGift = await responseCheckGift.json();
+
+                if (dataCheckGift.success === false || dataCheckGift.tien_ngoc_available === false) {
+                    showNotification(dataCheckGift.message, 'error');
+                    continue;
+                }
+                if (dataCheckGift.message === "Đạo hữu đã gửi quà cho tối đa 5 người bạn khác nhau trong ngày hôm nay! Hãy thử lại vào ngày mai.") {
+                    showNotification(dataCheckGift.message, 'error');
+                    taskTracker.markTaskDone(accountId, 'tienduyen');
+                    break friendLoop;
+                }
+                if (dataCheckGift.message === 'Đã đạt giới hạn tặng bằng Tiên Ngọc cho người này hôm nay.') {
+                    count++;
+                }
+                
+                // Tặng hoa - kiểm tra remaining_free_gifts có hợp lệ không
+                const remainingGifts = parseInt(dataCheckGift.remaining_free_gifts) || 0;
+                for (let i = 0; i < remainingGifts; i++) {
+                    const response = await fetch(this.apiUrl, {
                         method: 'POST',
                         credentials: 'include',
                         headers: {
-                            'Content-Type': 'application/x-www-form-urlencoded',
-                            'X-Wp-Nonce': this.nonce
+                            'Content-Type': 'application/json',
+                            'X-WP-Nonce': this.nonce
                         },
-                        body: `action=check_daily_gift_limit&user_id=${accountId}&friend_id=${friendId}&cost_type=tien_ngoc`,
+                        body: JSON.stringify({action: 'gift_to_friend', cost_type: 'tien_ngoc', friend_id: friendId, gift_type: 'hoa_hong'}),
                     });
-                    const dataCheckGift = await responseCheckGift.json();
-                    if (dataCheckGift.success === false || dataCheckGift.tien_ngoc_available === false) {
-                        showNotification(dataCheckGift.message, 'error');
-                        continue;
-                    }
-                    if (dataCheckGift.message === "Đạo hữu đã gửi quà cho tối đa 5 người bạn khác nhau trong ngày hôm nay! Hãy thử lại vào ngày mai.") {
-                        showNotification(dataCheckGift.message, 'error');
-                        taskTracker.markTaskDone(accountId, 'tienduyen');
-                        break friendLoop;
-                    }
-                    if (dataCheckGift.message === 'Đã đạt giới hạn tặng bằng Tiên Ngọc cho người này hôm nay.') {
-                        count++;
-                    }
-                    // Tặng hoa 3 lần hoặc tối đa số hoa còn lại
-                    for (let i = 0; i < dataCheckGift.remaining_free_gifts; i++) {
-                        const response = await fetch(weburl + '/wp-json/hh3d/v1/action', {
-                        method: 'POST',
-                        credentials: 'include',
-                        headers: {
-                            'Content-Type': 'application/x-www-form-urlencoded',
-                            'X-Wp-Nonce': this.nonce
-                        },
-                        body: `action=gift_to_friend&cost_type=tien_ngoc&friend_id=${friendId}&gift_type=hoa_hong`,
-                        });
-                        const data = await response.json();
-                        if (data.success) {
-                            showNotification(data.message, 'success');
-                            if (i === dataCheckGift.remaining_free_gifts - 1) { count++; }
-                        } else {
-                            showNotification(data.message, 'error');
-                            if (data.message === "Đạo hữu đã gửi quà cho tối đa 5 người bạn khác nhau trong ngày hôm nay! Hãy thử lại vào ngày mai.") {
-                                taskTracker.markTaskDone(accountId, 'tienduyen');
-                                break friendLoop;
-                            }
+                    const data = await response.json();
+                    if (data.success) {
+                        showNotification(data.message, 'success');
+                        if (i === remainingGifts - 1) { count++; }
+                    } else {
+                        showNotification(data.message, 'error');
+                        if (data.message === "Đạo hữu đã gửi quà cho tối đa 5 người bạn khác nhau trong ngày hôm nay! Hãy thử lại vào ngày mai.") {
+                            taskTracker.markTaskDone(accountId, 'tienduyen');
+                            break friendLoop;
                         }
-                        await new Promise(r => setTimeout(r, 300));
                     }
-                    showNotification(`Đã tặng hoa cho bạn bè: ${count}`, 'info');
-                    if (count >= 5) {
-                        taskTracker.markTaskDone(accountId, 'tienduyen');
-                        break friendLoop;
-                    }; // Chỉ tặng hoa cho tối đa 5 bạn bè
                     await new Promise(r => setTimeout(r, 300));
                 }
+                
+                if (count >= 5) {
+                    taskTracker.markTaskDone(accountId, 'tienduyen');
+                    break friendLoop;
+                }
+                await new Promise(r => setTimeout(r, 300));
             }
+            
+            // Thông báo kết quả cuối cùng (CHỈ 1 LẦN)
+            showNotification(`Đã tặng hoa cho ${count} bạn bè`, 'info');
             this.uocNguyen();
         }
 
@@ -6366,19 +6437,120 @@
     class hienTuviKhoangMach {
         constructor() {
             this.selfTuViCache = null;
-            this.mineImageSelector = '.mine-image';
-            this.attackButtonSelector = '.attack-btn';
-            this.currentMineUsers = []; // Sẽ lưu dữ liệu người dùng tại đây
-            this.tempObserver = null; // Biến để lưu MutationObserver tạm thời
             this.nonceGetUserInMine = null;
             this.nonce = null;
-            this.headers = {
-                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-                'X-Requested-With': 'XMLHttpRequest'
-            };
-            this.currentMineId = null;
-            this.tempObserverRearrange = null; // Biến để lưu MutationObserver tạm thời khi sắp xếp
 
+            // ✅ Cache data từ hook XHR/fetch
+            this._usersCache = new Map(); // Map<mineId, {data, timestamp}>
+            this._cacheTimeout = 10000; // Cache hết hạn sau 10 giây
+            this._setupRequestHook();
+        }
+
+        /**
+         * Hook vào XMLHttpRequest và fetch để bắt response từ trang web
+         * Khi trang web gọi get_users_in_mine, ta cache lại data để dùng
+         */
+        _setupRequestHook() {
+            const self = this;
+
+            // ===== HOOK XMLHttpRequest =====
+            const originalXHRSend = XMLHttpRequest.prototype.send;
+            XMLHttpRequest.prototype.send = function(body) {
+                this.addEventListener('load', function() {
+                    try {
+                        // Kiểm tra xem request có phải get_users_in_mine không
+                        if (body && typeof body === 'string' && body.includes('get_users_in_mine')) {
+                            const data = JSON.parse(this.responseText);
+                            if (data.success && data.data) {
+                                // Trích xuất mine_id từ body
+                                const params = new URLSearchParams(body);
+                                const mineId = params.get('mine_id');
+                                if (mineId) {
+                                    self._usersCache.set(mineId, {
+                                        data: data.data,
+                                        timestamp: Date.now()
+                                    });
+                                    console.log(`[Hook XHR] ✅ Đã cache users cho mỏ ${mineId}`);
+                                    self.showTotalEnemies(mineId, data.data)
+                                        .catch(err => console.error('[Hook XHR] ❌ Không thể cập nhật thông tin mỏ:', err));
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        // Bỏ qua lỗi parse
+                    }
+                });
+                return originalXHRSend.apply(this, arguments);
+            };
+
+            // ===== HOOK fetch =====
+            const originalFetch = window.fetch;
+            window.fetch = async function(url, options) {
+                const response = await originalFetch.apply(this, arguments);
+
+                try {
+                    // Kiểm tra URL và body
+                    const body = options?.body;
+                    if (body && typeof body === 'string' && body.includes('get_users_in_mine')) {
+                        const clone = response.clone();
+                        const data = await clone.json();
+                        if (data.success && data.data) {
+                            const params = new URLSearchParams(body);
+                            const mineId = params.get('mine_id');
+                            if (mineId) {
+                                self._usersCache.set(mineId, {
+                                    data: data.data,
+                                    timestamp: Date.now()
+                                });
+                                console.log(`[Hook Fetch] ✅ Đã cache users cho mỏ ${mineId}`);
+                                self.showTotalEnemies(mineId, data.data)
+                                    .catch(err => console.error('[Hook Fetch] ❌ Không thể cập nhật thông tin mỏ:', err));
+                            }
+                        }
+                    }
+                } catch (e) {
+                    // Bỏ qua lỗi
+                }
+
+                return response;
+            };
+
+            console.log('[Hiện Tu Vi] 🪝 Đã thiết lập hook XHR/Fetch');
+        }
+
+        /**
+         * Lấy users trong mỏ - ưu tiên cache từ hook, fallback sang API
+         * @param {string} mineId - ID của mỏ
+         * @returns {Promise<object|null>}
+         */
+        async getUsersInMine(mineId) {
+            // ✅ Kiểm tra cache trước
+            const cached = this._usersCache.get(mineId);
+            if (cached && (Date.now() - cached.timestamp) < this._cacheTimeout) {
+                console.log(`[Hiện Tu Vi] 📦 Dùng cache cho mỏ ${mineId}`);
+                return cached.data;
+            }
+
+            // ⏳ Đợi tối đa 1.5 giây để hook có thời gian bắt response từ trang web
+            // Kiểm tra mỗi 100ms
+            const maxWait = 1500;
+            const checkInterval = 100;
+            let waited = 0;
+
+            while (waited < maxWait) {
+                await new Promise(r => setTimeout(r, checkInterval));
+                waited += checkInterval;
+
+                const cachedNow = this._usersCache.get(mineId);
+                if (cachedNow && (Date.now() - cachedNow.timestamp) < this._cacheTimeout) {
+                    console.log(`[Hiện Tu Vi] 📦 Dùng cache cho mỏ ${mineId} (sau ${waited}ms)`);
+                    return cachedNow.data;
+                }
+            }
+
+            // ❌ Hết thời gian đợi vẫn không có cache -> gọi API (fallback)
+            console.log(`[Hiện Tu Vi] 🔄 Không có cache sau ${maxWait}ms, gọi API cho mỏ ${mineId}`);
+            return await khoangmach.getUsersInMine(mineId);
         }
 
         async waitForElement(selector, timeout = 15000) {
@@ -6399,12 +6571,6 @@
                     resolve(null);
                 }, timeout);
             });
-        }
-        async getNonceGetUserInMine() {
-            const htmlSource = document.documentElement.innerHTML;
-            const regex = /action:\s*'get_users_in_mine',[\s\S]*?security:\s*'([a-f0-9]+)'/;
-            const match = htmlSource.match(regex);
-            return match ? match[1] : null;
         }
 
         async getNonce() {
@@ -6570,51 +6736,6 @@
             btn.insertAdjacentElement('afterend', info);
         }
 
-        async getUsersInMine(mineId) {
-            let securityToken = null;
-            // Cách 1: Lấy từ unsafeWindow (Biến thật của trang web)
-            if (typeof hh3dData !== 'undefined' && hh3dData.securityToken) {
-                console.log(`[Hiện Tu vi] ℹ️ Lấy 'security_token' từ biến global thông thường.`);
-                securityToken = hh3dData.securityToken;
-            } else // Cách 2: Lấy từ unsafeWindow (Biến của trang web trong môi trường userscript)
-                if (typeof unsafeWindow !== 'undefined' && unsafeWindow.hh3dData && unsafeWindow.hh3dData.securityToken) {
-                console.log(`[Hiện Tu vi] ℹ️ Lấy 'security_token' từ unsafeWindow.`);
-                securityToken = unsafeWindow.hh3dData.securityToken;
-            } 
-
-            if (!this.nonceGetUserInMine || !securityToken) {
-                let errorMsg = 'Lỗi (get_users):';
-                if (!this.nonceGetUserInMine) errorMsg += " Nonce (security) chưa được cung cấp.";
-                if (!securityToken) errorMsg += " Không tìm thấy 'security_token' (hh3dData).";
-
-                showNotification(errorMsg, 'error');
-                return null;
-            }
-
-            const payload = new URLSearchParams({
-                action: 'get_users_in_mine',
-                mine_id: mineId,
-                security_token: securityToken,
-                security: this.nonceGetUserInMine
-            });
-
-            try {
-                const r = await fetch(ajaxUrl, {
-                    method: 'POST',
-                    headers: this.headers,
-                    body: payload,
-                    credentials: 'include'
-                });
-                const d = await r.json();
-
-                return d.success ? d.data : (showNotification(d.message || 'Lỗi lấy thông tin người chơi.', 'error'), null);
-
-            } catch (e) {
-                console.error(`[Hiện Tu vi] ❌ Lỗi mạng (lấy user):`, e);
-                return null;
-            }
-        }
-
         async getTuVi(userId) {
             // 0. Chuẩn bị Nonce & Headers
             if (!this.nonce) {
@@ -6749,8 +6870,9 @@
             };
         }
 
-        async showTotalEnemies(mineId) {
-            const data = await this.getUsersInMine(mineId);
+        async showTotalEnemies(mineId, usersData = null) {
+            // Nếu đã có data thì dùng luôn, không cần gọi API lại
+            const data = usersData || await this.getUsersInMine(mineId);
             const currentMineUsers = data && data.users ? data.users : [];
             let totalEnemies = 0;
             let totalLienMinh = 0;
@@ -6807,51 +6929,14 @@
             }
         }
 
-        async addEventListenersToReloadBtn(mineId) {
-            const reloadBtn = document.querySelector('#reload-btn');
-            if (reloadBtn && !reloadBtn.dataset.listenerAdded) {
-                reloadBtn.addEventListener('click', async () => {
-                    this.showTotalEnemies(mineId);
-                });
-                reloadBtn.dataset.listenerAdded = 'true';
-            }
-        }
-
-        async addEventListenersToMines() {
-            const mineImages = document.querySelectorAll(this.mineImageSelector);
-            mineImages.forEach(image => {
-                if (!image.dataset.listenerAdded) {
-                    image.addEventListener('click', async (event) => {
-                        const mineId = event.currentTarget.getAttribute('data-mine-id');
-                        if (mineId) {
-                            this.showTotalEnemies(mineId);
-                            this.addEventListenersToReloadBtn(mineId);
-                        }
-                    });
-                    image.dataset.listenerAdded = 'true';
-                }
-            });
-        }
-
         async showTuVi(myTuVi) {
             if (!myTuVi) return;
 
             const buttons = document.querySelectorAll('.attack-btn');
             if (buttons.length === 0) return;
 
-            // Lấy mineId từ nút đầu tiên
-            const mineId = buttons[0]?.getAttribute('data-mine-id');
-            
-            // Sắp xếp lại thứ tự hiển thị: Kẻ địch lên đầu (trừ chủ mỏ và bản thân)
-            if (mineId && !document.body.dataset.rearranged) {
-                await this.rearrangeUsersByEnemy(mineId);
-                document.body.dataset.rearranged = mineId; // Đánh dấu đã sắp xếp cho mỏ này
-            }
-
-            // Lấy lại buttons sau khi đã sắp xếp
-            const buttonsAfterRearrange = document.querySelectorAll('.attack-btn');
-            
-            for (const btn of buttonsAfterRearrange) {
+            for (const btn of buttons) {
+                // Bỏ qua nếu đã xử lý
                 if (btn.dataset.tuviAttached === '1') continue;
                 btn.dataset.tuviAttached = '1';
 
@@ -6861,111 +6946,18 @@
                 try {
                     const opponentTuVi = await this.getTuVi(userId);
                     if (opponentTuVi) {
-                        const rate = this.winRate(myTuVi, opponentTuVi).toFixed(2);
                         this.upsertTuViInfo(btn, userId, opponentTuVi, myTuVi);
                     } else {
-                        await new Promise(r => setTimeout(r, 500))
+                        // Nếu không lấy được Tu Vi, thử lấy cảnh giới
+                        await new Promise(r => setTimeout(r, 500));
                         this.upsertTierInfo(btn, userId);
                     }
                 } catch (e) {
-                    console.error('getTuVi error', e);
+                    console.error('[Hiện Tu Vi] ❌ Lỗi getTuVi:', e);
                 }
 
-                if (mineId && mineId !== this.currentMineId) {
-                    this.currentMineId = mineId;
-                    this.showTotalEnemies(mineId);
-                    this.addEventListenersToReloadBtn(mineId);
-                }
-                // nghỉ 1s tránh spam
+                // Nghỉ 1s tránh spam API
                 await new Promise(r => setTimeout(r, 1000));
-            }
-        }
-
-        /**
-         * Sắp xếp lại các user trong mỏ: đưa kẻ địch lên đầu (trừ chủ mỏ vị trí 0 và bản thân)
-         * @param {string} mineId - ID của mỏ
-         */
-        async rearrangeUsersByEnemy(mineId) {
-            try {
-                // Lấy dữ liệu users từ API
-                const data = await this.getUsersInMine(mineId);
-                if (!data || !data.users || data.users.length === 0) return;
-
-                const users = data.users;
-                
-                // Tạo map userId -> user data để tra cứu nhanh
-                const userMap = new Map();
-                users.forEach(u => userMap.set(String(u.id), u));
-
-                // Lấy container chứa các user (thường là parent của các attack-btn)
-                const buttons = document.querySelectorAll('.attack-btn');
-                if (buttons.length === 0) return;
-
-                // Tìm container cha chung của các user items
-                const firstBtn = buttons[0];
-                const userContainer = firstBtn.closest('.batquai-item')?.parentElement 
-                                   || firstBtn.closest('[class*="user"]')?.parentElement
-                                   || firstBtn.parentElement?.parentElement;
-                
-                if (!userContainer) return;
-
-                // Lấy tất cả các user items (phần tử con trực tiếp chứa attack-btn)
-                const userItems = Array.from(userContainer.children).filter(el => 
-                    el.querySelector('.attack-btn')
-                );
-
-                if (userItems.length <= 1) return;
-
-                // Lấy accountId của bản thân
-                const selfId = String(accountId);
-                
-                // Xác định chủ mỏ (vị trí đầu tiên trong danh sách API)
-                const ownerId = users.length > 0 ? String(users[0].id) : null;
-
-                // Phân loại các items
-                const ownerItem = []; // Chủ mỏ - giữ nguyên vị trí đầu
-                const selfItem = [];  // Bản thân - giữ nguyên vị trí
-                const enemyItems = []; // Kẻ địch - đưa lên sau chủ mỏ
-                const allyItems = [];  // Đồng minh/Liên minh - xuống cuối
-
-                for (const item of userItems) {
-                    const btn = item.querySelector('.attack-btn');
-                    const userId = btn?.getAttribute('data-user-id');
-                    
-                    if (!userId) {
-                        allyItems.push(item);
-                        continue;
-                    }
-
-                    const userData = userMap.get(userId);
-                    
-                    if (userId === ownerId) {
-                        // Chủ mỏ - giữ đầu
-                        ownerItem.push(item);
-                    } else if (userId === selfId) {
-                        // Bản thân - giữ nguyên (sẽ để sau chủ mỏ)
-                        selfItem.push(item);
-                    } else if (userData && !userData.dong_mon && !userData.lien_minh) {
-                        // Kẻ địch - đưa lên đầu (sau chủ mỏ và bản thân)
-                        enemyItems.push(item);
-                    } else {
-                        // Đồng môn/Liên minh - xuống cuối
-                        allyItems.push(item);
-                    }
-                }
-
-                // Sắp xếp lại: Chủ mỏ -> Bản thân -> Kẻ địch -> Đồng minh
-                const newOrder = [...ownerItem, ...selfItem, ...enemyItems, ...allyItems];
-
-                // Chèn lại các items theo thứ tự mới
-                for (const item of newOrder) {
-                    userContainer.appendChild(item);
-                }
-
-                console.log(`[Hiện Tu Vi] ✅ Đã sắp xếp lại: ${enemyItems.length} kẻ địch lên đầu`);
-
-            } catch (e) {
-                console.error('[Hiện Tu Vi] ❌ Lỗi sắp xếp users:', e);
             }
         }
 
@@ -6973,35 +6965,30 @@
             if (document.readyState === 'loading') {
                 await new Promise(resolve => document.addEventListener('DOMContentLoaded', resolve, { once: true }));
             }
-            this.nonceGetUserInMine = await this.getNonceGetUserInMine();
+            
+            // Lấy nonce để sử dụng cho các API calls
             this.nonce = await this.getNonce();
             await this.waitForElement('#head_manage_acc', 15000);
 
             const myTuVi = await this.getSelfTuVi();
-            if (myTuVi) {
-                await this.showTuVi(myTuVi);
+            if (!myTuVi) {
+                console.warn('[Hiện Tu Vi] ⚠️ Không lấy được Tu Vi của bản thân');
+                return;
             }
 
-            // quan sát DOM để cập nhật khi các nút attack xuất hiện hoặc nội dung thay đổi
-            let __timeout = null;
+            // Hiển thị Tu Vi cho các nút attack hiện có
+            await this.showTuVi(myTuVi);
+
+            // Quan sát DOM để cập nhật khi có nút attack mới
+            let debounceTimeout = null;
             const observer = new MutationObserver(() => {
-                clearTimeout(__timeout);
-                __timeout = setTimeout(async () => {
-                    await this.showTuVi(myTuVi);
-                }, 200);
+                clearTimeout(debounceTimeout);
+                debounceTimeout = setTimeout(() => this.showTuVi(myTuVi), 300);
             });
             observer.observe(document.body, { childList: true, subtree: true });
-
-            this.addEventListenersToMines();
-            // MutationObserver chính để thêm listener cho các mỏ mới
-            const mainObserver = new MutationObserver(() => {
-                this.addEventListenersToMines();
-            });
-
-            mainObserver.observe(document.body, { childList: true, subtree: true });
         }
     }
-    // ===============================================
+     // ===============================================
     // Bộ lọc tông môn
     // ===============================================
     async function getDivContent(url, selector) {
