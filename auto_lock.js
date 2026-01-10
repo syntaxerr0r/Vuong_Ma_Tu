@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey
-// @version       5.4.4
+// @version       5.5
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.li/*
@@ -1743,7 +1743,36 @@
                     return { remainingAttacks: null, nonce: null };
                 }
             }
-
+        /**
+         * Mua rương Hoang Vực.
+         */
+        async buyHoangVucChest(nonce) {
+            const quantity = localStorage.getItem(`hoangvucChestQuantity_${accountId}`) || '1';
+            try {
+                const buychest = await fetch(this.ajaxUrl, {
+                    method: 'POST',
+                    headers: this.headers,
+                    body: new URLSearchParams({
+                        action: "purchase_item_shop_boss",
+                        item_id: "ruong_linh_bao",
+                        item_type: "tinh_thach",
+                        quantity: quantity,
+                        nonce: nonce
+                    }),
+                    referrer: `${weburl}hoang-vuc?t`,
+                    credentials: 'include'
+                });
+                const buychestdata = await buychest.json();
+                if (buychestdata.success) {
+                    const message = `✅ Mua rương Hoang Vực thành công: +${buychestdata.data.total_items} rương.`;  
+                    showNotification(message, 'success');
+                } else if (buychestdata.data !== 'Mỗi ngày chỉ có thể mua tối đa 5 rương bằng Tinh Thạch.') {
+                        showNotification(buychestdata.data || 'Lỗi khi mua rương.', 'error');
+                }
+            } catch (e) {
+                showNotification(`Lỗi mạng khi mua rương: ${e.message}`, 'error');
+            }
+        }
 
         /**
          * Hàm chính để tự động hóa Hoang Vực.
@@ -1821,6 +1850,7 @@
                             taskTracker.adjustTaskTime(accountId, 'hoangvuc', timePlus('15:02'));   //--------- 15 phút cho lần sau -----------//
                             if (remainingAttacks <= 1) {
                             taskTracker.markTaskDone(accountId, 'hoangvuc');
+                            await this.buyHoangVucChest(nonce);
                             };
                         };
                     } else {
@@ -3790,13 +3820,13 @@
         }
 
         // Phương thức để gửi yêu cầu lấy rương (Daily Chest)
-        async getDailyChest(stage) {
+        async getDailyChest(stage, securityToken) {
             if (stage !== "stage1" && stage !== "stage2") {
                 console.error("Lỗi: Stage phải là 'stage1' hoặc 'stage2'.");
                 return false;
             }
 
-            const bodyData = `action=daily_activity_reward&stage=${stage}`;
+            const bodyData = `action=daily_activity_reward&stage=${stage}&security_token=${securityToken}`;
 
             try {
                 const response = await fetch(this.ajaxUrl, {
@@ -3873,17 +3903,150 @@
             } while (remainingSpins > 0);
         }
 
+        // Khắc trận văn Active seal
+        async activeSeal() {
+            const nonce = await getNonce();
+            if (!nonce) {
+                showNotification('❌ Lỗi: Không thể lấy nonce cho Khắc Trận Văn', 'error');
+                return false;
+            }
+
+            const ptPageUrl = weburl + 'trieu-hoi-phap-tuong?t=' + Date.now();
+            const token = await getSecurityNonce(ptPageUrl, /PHAP_TUONG_CONFIG\s*=\s*\{[^}]*?token\s*:\s*['"]([^'"]+)['"]/);
+            if (!token) {
+                showNotification('❌ Lỗi: Không thể lấy token cho Khắc Trận Văn', 'error');
+                return false;
+            }
+
+            const apiPrefix = weburl + "wp-json/phap-tuong/v1/";
+            const getSealURL = apiPrefix + "get-seals";
+            const activateSealURL = apiPrefix + "activate-seal";
+            const completeURL = apiPrefix + "complete-summoning";
+            const claimURL = apiPrefix + "claim-daily-turns";
+            const referrer = ptPageUrl
+
+            const baseHeaders = {
+                "Accept": "*/*",
+                "X-WP-Nonce": nonce,
+                "Content-Type": "application/json",
+                "X-Requested-With": "XMLHttpRequest"
+            };
+
+            const ptHeaders = { ...baseHeaders, "X-PT-Token": token };
+
+            try {
+                // 1. Nhận lượt hàng ngày trước
+                console.log("[HH3D] Đang nhận lượt Khắc Trận Văn hàng ngày...");
+                const claimRes = await fetch(claimURL, {
+                    method: "POST",
+                    headers: ptHeaders,
+                    credentials: "include",
+                    referrer: referrer
+                });
+                const claimData = await claimRes.json();
+                if (claimData.success) {
+                    showNotification(`🎁 ${claimData.message}`, 'success');
+                }
+
+                // 2. Kiểm tra trạng thái hiện tại
+                const getRes = await fetch(getSealURL, {
+                    method: "GET",
+                    headers: baseHeaders, // GET get-seals không cần PT-Token
+                    credentials: "include",
+                    referrer: referrer
+                });
+                const getData = await getRes.json();
+                
+                if (!getData.success) {
+                    showNotification('❌ Lỗi: Không thể lấy thông tin Trận Văn', 'error');
+                    return false;
+                }
+
+                let seals = getData.seals || [];
+                
+                // Nếu đã đủ 9 trận văn, triệu hồi luôn
+                if (seals.length === 9) {
+                    const completeRes = await fetch(completeURL, {
+                        method: "POST",
+                        headers: ptHeaders,
+                        credentials: "include",
+                        referrer: referrer
+                    });
+                    const completeData = await completeRes.json();
+                    if (completeData.success) {
+                        showNotification(`🎉 Triệu hồi thành công Pháp Tướng: ${completeData.phap_tuong?.name || ''}`, 'success');
+                        return true;
+                    }
+                }
+
+                // 3. Bắt đầu khắc Trận Văn
+                let loopCount = 0;
+                while (loopCount < 10) { 
+                    const activeRes = await fetch(activateSealURL, {
+                        method: "POST",
+                        headers: ptHeaders,
+                        credentials: "include",
+                        referrer: referrer
+                    });
+                    const activeData = await activeRes.json();
+
+                    if (!activeData) break;
+
+                    if (activeData.success && activeData.activated_seals) {
+                        seals = [...new Set([...seals, ...activeData.activated_seals])];
+                        const pity = activeData.pity_data;
+                        const pityInfo = pity ? ` (Thiên Cơ: ${pity.fail_count} hụt, tỉ lệ ${pity.next_rate || pity.current_rate}%)` : '';
+                        showNotification(`✨ Khắc thành công: ${seals.length}/9 Trận Văn${pityInfo}`, 'success');
+                        
+                        if (seals.length === 9) {
+                            const completeRes = await fetch(completeURL, {
+                                method: "POST",
+                                headers: ptHeaders,
+                                credentials: "include",
+                                referrer: referrer
+                            });
+                            const completeData = await completeRes.json();
+                            if (completeData.success) {
+                                showNotification(`🎉 Triệu hồi thành công Pháp Tướng: ${completeData.phap_tuong?.name || ''}`, 'success');
+                                return true;
+                            }
+                        }
+                    } else if (activeData.is_pity_failure) {
+                        const pity = activeData.pity_data;
+                        showNotification(`[HH3D] Khắc hụt. Thiên cơ: ${pity.fail_count}, tỉ lệ kế: ${pity.next_rate}%`, 'info');
+                    } else {
+                        if (activeData.message && (activeData.message.includes('không còn lượt'))) {
+                            console.log("[HH3D] Đã hết lượt khắc Trận Văn.");
+                            break;
+                        }
+                    }
+
+                    if (activeData.remaining_turns === 0) break;
+                    
+                    loopCount++;
+                    await new Promise(r => setTimeout(r, 1000));
+                }
+                
+                return true;
+            } catch (error) {
+                console.error('Lỗi Khắc Trận Văn:', error);
+                return false;
+            }
+        }
+
         async doHoatDongNgay() {
             const isTaskDone = taskTracker.isTaskDone(accountId, 'hoatdongngay');
             if (taskTracker.isTaskDone(accountId, 'hoatdongngay')) return;
 
             console.log("Bắt đầu nhận rương hoạt động ngày...");
-            const chest1 = await this.getDailyChest("stage1");
-            const chest2 = await this.getDailyChest("stage2");
+            const securityToken = await getSecurityToken(weburl + 'bang-hoat-dong-ngay?t');
+            const chest1 = await this.getDailyChest("stage1", securityToken);
+            const chest2 = await this.getDailyChest("stage2", securityToken);
             const spin = await this.spinLottery();
-            if (chest1 && chest2 && spin) {
+            const activeSeal = await this.activeSeal(); 
+            if (chest1 && chest2 && spin && activeSeal) {
                 taskTracker.markTaskDone(accountId, 'hoatdongngay');
-                showNotification("✅ Hoàn thành hoạt động ngày và vòng quay phúc vận!", 'success');
+                showNotification("✅ Lấy rương hoạt động ngày, vòng quay phúc vận và Pháp Tướng!", 'success');
             }
         }
     }
@@ -4376,7 +4539,7 @@
 
             }
             .custom-script-hoang-vuc-settings-btn:hover {
-                background-color: #1f6da1ff;
+                background-color: rgb(204, 255, 0);
             }
 
             /* Khoáng Mạch */
@@ -4414,6 +4577,9 @@
                 background-color: #7f8c8d;
                 cursor: not-allowed;
                 box-shadow: none;
+            }
+            .custom-script-khoang-mach-button:hover {
+                background-color: #2980b9;
             }
             .custom-script-settings-panel {
                 background-color: #333;
@@ -4700,11 +4866,37 @@
         createHoangVucMenu(parentGroup) {
             const hoangVucButton = document.createElement('button');
             hoangVucButton.textContent = 'Hoang Vực';
-            hoangVucButton.classList.add('custom-script-hoang-vuc-btn');
+            hoangVucButton.classList.add('custom-script-khoang-mach-button', );
             this.buttonMap.set('hoangvuc', hoangVucButton)
 
             const settingsButton = document.createElement('button');
             settingsButton.classList.add('custom-script-hoang-vuc-settings-btn');
+
+            const quantityButton = document.createElement('button');
+            quantityButton.classList.add('custom-script-hoang-vuc-settings-btn');
+            quantityButton.title = 'Số lượng rương Linh Bảo muốn mua';
+
+            const numberIcons = ['0️⃣', '1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣'];
+            const getSavedQuantity = () => {
+                const saved = parseInt(localStorage.getItem(`hoangvucChestQuantity_${accountId}`) || '0', 10);
+                return isNaN(saved) ? 0 : Math.min(Math.max(saved, 0), 5);
+            };
+
+            const updateQuantityDisplay = (value) => {
+                quantityButton.textContent = numberIcons[value] || value.toString();
+                quantityButton.title = `Số lượng rương Linh Bảo muốn mua: ${value}`;
+            };
+
+            let currentQuantity = getSavedQuantity();
+            updateQuantityDisplay(currentQuantity);
+
+            quantityButton.addEventListener('click', () => {
+                currentQuantity = (currentQuantity + 1) % 6;
+                localStorage.setItem(`hoangvucChestQuantity_${accountId}`, currentQuantity.toString());
+                updateQuantityDisplay(currentQuantity);
+                showNotification(`Số lượng rương Linh Bảo đặt mua: ${currentQuantity}`, 'info');
+            });
+
 
             const updateSettingsIcon = () => {
                 const maximizeDamage = localStorage.getItem('hoangvucMaximizeDamage') === 'true';
@@ -4739,6 +4931,7 @@
             });
 
             parentGroup.appendChild(settingsButton);
+            parentGroup.appendChild(quantityButton);
             parentGroup.appendChild(hoangVucButton);
 
             this.updateButtonState('hoangvuc');
