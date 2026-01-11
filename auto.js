@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey
-// @version       5.5.2
+// @version       5.5.3
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
 // @match         https://hoathinh3d.moi/*
@@ -4399,7 +4399,7 @@
                 flex-direction: column !important;
                 position: absolute;
                 background-color: #242323ff;
-                min-width: 300px !important;
+                min-width: 330px !important;
                 z-index: 1001;
                 border-radius: 5px;
                 top: calc(100% + 6px);
