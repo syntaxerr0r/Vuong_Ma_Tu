@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name          HH3D - Menu Tùy Chỉnh
 // @namespace     Tampermonkey
-// @version       5.5
+// @version       5.5.2
 // @description   Thêm menu tùy chỉnh với các liên kết hữu ích và các chức năng tự động
 // @author        Dr. Trune
-// @match         https://hoathinh3d.li/*
+// @match         https://hoathinh3d.moi/*
 // @require       https://cdn.jsdelivr.net/npm/sweetalert2@11.26.12/dist/sweetalert2.all.min.js
 // @run-at        document-start
 // @grant         unsafeWindow
@@ -6297,7 +6297,7 @@
                 if (data.success) {
                     showNotification(data.data.message, 'success');
                     localStorage.setItem(`promo_code_${accountId}`, promoCodeFetched);
-                } else if (data.data.message  === '⚠️ Đạo hữu đã hấp thụ linh thạch này rồi!') {
+                } else if (data.data.message  === '⚠️ Đạo hữu đã hấp thụ linh thạch này rồi!' || data.data.error_type === 1001 || ( response.status === 200 && data.data.success === false)) {
                     localStorage.setItem(`promo_code_${accountId}`, promoCodeFetched);
                 } else {
                     showNotification(`❌ Lỗi nhập mã thưởng: ${data.message || 'Không xác định'}`, 'error');
