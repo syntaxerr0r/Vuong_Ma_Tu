@@ -97,6 +97,12 @@
             url: weburl + 'bang-hoat-dong-ngay?t'
         }, ]
     }, {
+        name: 'Tông Môn',
+        links: [{
+            text: 'Mua Đan Dược',
+            isMuaDan: true
+        }]
+    }, {
         name: 'Đổ Thạch',
         links: [{
             text: 'Đổ Thạch',
@@ -1887,10 +1893,10 @@
         /**
          * Hàm hỗ trợ: Gửi yêu cầu API chung.
          */
-        async sendApiRequest(endpoint, method, nonce, body = {}) {
+        async sendApiRequest(endpoint, method, nonce, token, body = {}) {
             try {
                 const url = `${this.weburl}${endpoint}`;
-                const headers = { "Content-Type": "application/json", "X-WP-Nonce": nonce };
+                const headers = { "Content-Type": "application/json", "X-LV-Token": token, "X-WP-Nonce": nonce };
                 const response = await fetch(url, {
                     method,
                     headers,
@@ -1929,38 +1935,39 @@
         /**
          * Đảm bảo tính năng tự động chấp nhận khiêu chiến được bật.
          */
-        async ensureAutoAccept(nonce) {
+        async ensureAutoAccept(nonce, token) {
             if (taskTracker.getTaskStatus(accountId, 'luanvo', 'auto_accept') === true) {
                 return true; // Đã bật trước đó
             }
             const toggleEndpoint = 'wp-json/luan-vo/v1/toggle-auto-accept';
-            const result1 = await this.sendApiRequest(toggleEndpoint, 'POST', nonce, {});
+            const result1 = await this.sendApiRequest(toggleEndpoint, 'POST', nonce, token, {});
             if (!result1 || !result1.success) return false;
-
-            if (result1.message.includes('Đã bật')) {
-                taskTracker.updateTask(accountId, 'luanvo', 'auto_accept', 'true');
+            
+            if (result1.message && result1.message.includes('Đã bật')) {
+                taskTracker.updateTask(accountId, 'luanvo', 'auto_accept', true);
                 return true;
             }
-            const result2 = await this.sendApiRequest(toggleEndpoint, 'POST', nonce, {});
-            if (result2 && result2.success && result2.message.includes('Đã bật'))
+            const result2 = await this.sendApiRequest(toggleEndpoint, 'POST', nonce, token, {});
+            if (result2 && result2.success && result2.message && result2.message.includes('Đã bật'))
                 {taskTracker.updateTask(accountId, 'luanvo', 'auto_accept', true);
                 return true;
             };
+            return false;
         }
 
         /**
          * Lấy danh sách tất cả user đang theo dõi
          * Gồm các phần: id, name, avatar, points, auto_accept, can_receive_count, profile_link, role, role_color, description, challenges_remaining, challenge_exists, challenge_id, is_following, is_joined_today, can_send_count, max_batch_count
          */
-        async getFollowingUsers(nonce) {
+        async getFollowingUsers(nonce, token) {
             console.log(`${this.logPrefix} 🕵️ Đang lấy danh sách người theo dõi...`);
             const endpoint = 'wp-json/luan-vo/v1/get-following-users';
             const body = { page: 1 };
-            const data = await this.sendApiRequest(endpoint, 'POST', nonce, body);
+            const data = await this.sendApiRequest(endpoint, 'POST', nonce, token, body);
 
             if (data && data.success) {
                 console.log(`${this.logPrefix} ✅ Lấy danh sách thành công. Tìm thấy ${data.data.users.length} người dùng.`);
-                return data.data.users
+                return data.data.users;
             } else {
                 const message = data?.message || 'Lỗi không xác định khi lấy danh sách người theo dõi.';
                 console.error(`${this.logPrefix} ❌ ${message}`);
@@ -1972,12 +1979,12 @@
          * Lấy danh sách tất cả user đang theo dõi
          * Gồm các phần: id, name, avatar, points, auto_accept, can_receive_count, profile_link, role, role_color, description, challenges_remaining, challenge_exists, challenge_id, is_following, is_joined_today, can_send_count, max_batch_count
          */
-        async  getOnlineUsers(nonce) {
+        async  getOnlineUsers(nonce, token) {
             console.log("🟢 Đang lấy danh sách người dùng online...");
             const endpoint = 'wp-json/luan-vo/v1/online-users';
             const body = { page: 1 };
 
-            const data = await this.sendApiRequest(endpoint, 'POST', nonce, body);
+            const data = await this.sendApiRequest(endpoint, 'POST', nonce, token, body);
             if (data && data.success) {
                 console.log(`✅ Lấy danh sách thành công. Tìm thấy ${data.data.users.length} người online.`);
                 return data.data.users; // trả nguyên danh sách
@@ -1991,12 +1998,12 @@
         /**
          * Gửi yêu cầu khiêu chiến đến một người chơi cụ thể.
          */
-        async sendChallenge(userId, nonce) {
+        async sendChallenge(userId, nonce, token) {
             console.log(`${this.logPrefix} 🎯 Đang gửi khiêu chiến đến người chơi ID: ${userId}...`);
 
             const sendEndpoint = 'wp-json/luan-vo/v1/send-challenge';
             const sendBody = { target_user_id: userId };
-            const sendResult = await this.sendApiRequest(sendEndpoint, 'POST', nonce, sendBody);
+            const sendResult = await this.sendApiRequest(sendEndpoint, 'POST', nonce, token, sendBody);
 
             if (sendResult && sendResult.success) {
                 console.log(`${this.logPrefix} 🎉 Gửi khiêu chiến thành công! Challenge ID: ${sendResult.data.challenge_id}`);
@@ -2011,7 +2018,7 @@
                         target_user_id: userId
                     };
 
-                    const approveResult = await this.sendApiRequest(approveEndpoint, 'POST', nonce, approveBody);
+                    const approveResult = await this.sendApiRequest(approveEndpoint, 'POST', nonce, token, approveBody);
 
                     if (approveResult && approveResult.success) {
                         showNotification(`[Luận võ] ${approveResult.data.message}!`, 'success');
@@ -2047,28 +2054,30 @@
         /**
          * Gửi yêu cầu nhận thưởng Luận Võ và xử lý phản hồi từ server.
          * @param {string} nonce - Nonce bảo mật của phiên làm việc.
+         * @param {string} token - Token Luận Võ của người dùng.
          */
-        async receiveReward(nonce) {
+        async receiveReward(nonce, token) {
             console.log(`${this.logPrefix} 🎁 Đang gửi yêu cầu nhận thưởng...`);
 
             const endpoint = 'wp-json/luan-vo/v1/receive-reward';
             const body = {};
 
             try {
-                const response = await this.sendApiRequest(endpoint, 'POST', nonce, body);
+                const response = await this.sendApiRequest(endpoint, 'POST', nonce, token, body);
                 if (!response) {
                     return;
                 }
                 if (response.success === true) {
-                    showNotification(`🎉 Luận võ: ${response.message}`, 'success');
+                    const msg = response.data?.message || response.message || 'Nhận thưởng thành công!';
+                    showNotification(`🎉 Luận võ: ${msg}`, 'success');
                     taskTracker.markTaskDone(accountId, 'luanvo');
                     return;
-                } else if (response.message === "Đạo hữu đã nhận thưởng trong ngày hôm nay.") {
+                } else if (response.message === "Đạo hữu đã nhận thưởng trong ngày hôm nay." || response.data?.message === "Đạo hữu đã nhận thưởng trong ngày hôm nay.") {
                     showNotification('🎁 Bạn đã nhận thưởng Luận Võ hôm nay rồi!', 'info')
                     taskTracker.markTaskDone(accountId, 'luanvo');
                     return;
                 } else {
-                    const errorMessage = response.message || 'Lỗi không xác định khi nhận thưởng.';
+                    const errorMessage = response.data?.message || response.message || 'Lỗi không xác định khi nhận thưởng.';
                     showNotification(`❌ ${errorMessage}`, 'error');
                 }
             } catch (error) {
@@ -2078,30 +2087,31 @@
         /**
          * Hàm chính: Chạy toàn bộ quy trình Luận Võ.
          */
-        async startLuanVo(nonce) {
-            const securityToken = await getSecurityToken(weburl + 'luan-vo-duong?t');
+        async startLuanVo(nonce, securityToken) {
             // Bước 2: Tham gia trận đấu
             if (!taskTracker.getTaskStatus(accountId, 'luanvo').battle_joined) {
-                const joinResult = await this.sendApiRequest(
-                    'wp-json/luan-vo/v1/join-battle', 'POST', nonce, {action: 'join_battle', security_token: securityToken}
-                );
-                if (joinResult && joinResult.success === true) {
+                const endpoint = 'wp-json/luan-vo/v1/join-battle';
+                const body = { action: 'join_battle', security_token: securityToken };
+                const joinResult = await this.sendApiRequest(endpoint, 'POST', nonce, securityToken, body);
+
+                if (joinResult && joinResult.success) {
                     console.log(`✅ Tham gia luận võ thành công.`);
                     taskTracker.updateTask(accountId, 'luanvo', 'battle_joined', true);
-                } else if (joinResult.message === 'Bạn đã tham gia Luận Võ Đường hôm nay rồi!') {
+                } else if (joinResult && (joinResult.message === 'Bạn đã tham gia Luận Võ Đường hôm nay rồi!' || joinResult.data?.message === 'Bạn đã tham gia Luận Võ Đường hôm nay rồi!')) {
                     console.log(`✅ Tham gia luận võ thành công.`);
                     taskTracker.updateTask(accountId, 'luanvo', 'battle_joined', true);
                 } else {
-                    showNotification('Lỗi máy chủ hoặc lỗi mạng khi tham gia luận võ', 'error');
+                    const errorMsg = joinResult?.data?.message || joinResult?.message || 'Lỗi không xác định khi tham gia luận võ.';
+                    showNotification(`Lỗi: ${errorMsg}`, 'error');
                 }
             } else {
-                console.log(`${this.logPrefix} Chưa tham gia luận võ trước đó.`);
+                console.log(`${this.logPrefix} Đã tham gia luận võ trước đó.`);
             }
 
 
             // Bước 3: Đảm bảo tự động chấp nhận khiêu chiến
             if (!taskTracker.getTaskStatus(accountId, 'luanvo').auto_accept) {
-                const autoAcceptSuccess = await this.ensureAutoAccept(nonce);
+                const autoAcceptSuccess = await this.ensureAutoAccept(nonce, securityToken);
                 if (!autoAcceptSuccess) {
                     showNotification('⚠️ Tham gia thành công nhưng không thể bật tự động chấp nhận.', 'warn');
                 } else {
@@ -2116,7 +2126,12 @@
                 showNotification(' Lỗi: Không thể❌ lấy nonce cho Luận Võ.', 'error');
                 return;
             }
-            await this.startLuanVo(nonce);
+            const securityToken = await getSecurityToken(this.weburl + 'luan-vo-duong?t');
+            if (!securityToken) {
+                showNotification(' Lỗi: Không thể❌ lấy security token cho Luận Võ.', 'error');
+                return;
+            }
+            await this.startLuanVo(nonce, securityToken);
             // Bước 4: Khiêu chiến người chơi
             if (!autoChallenge) {
                 //Hiện hộp thoại thông báo để người chơi tới trang luận võ thủ công
@@ -2128,7 +2143,7 @@
             let shouldAttackOnline = false;
 
             while (true) {
-                let allFollowingUsers = await this.getFollowingUsers(nonce);
+                let allFollowingUsers = await this.getFollowingUsers(nonce, securityToken);
 
                 // Nếu không có dữ liệu thì coi như rỗng
                 if (!Array.isArray(allFollowingUsers) || allFollowingUsers.length === 0) {
@@ -2147,7 +2162,7 @@
                     if (canChallengeUsers.length > 0) {
                         // Khiêu chiến user đầu tiên
                         console.log(`🎯 Chuẩn bị khiêu chiến với user ID: ${canChallengeUsers[0].id}`);
-                        const success = await this.sendChallenge(canChallengeUsers[0].id, nonce);
+                        const success = await this.sendChallenge(canChallengeUsers[0].id, nonce, securityToken);
                         if (success) {
 
                             myCanSend--;
@@ -2166,10 +2181,10 @@
                 // Nếu không còn ai để khiêu chiến từ following và user đồng ý, tấn công online
                 if (shouldAttackOnline) {
                     while (myCanSend > 0) {
-                        let allOnlineUsers = await this.getOnlineUsers(nonce);
+                        let allOnlineUsers = await this.getOnlineUsers(nonce, securityToken);
                         if (!Array.isArray(allOnlineUsers) || allOnlineUsers.length === 0) break;
 
-                        const success = await this.sendChallenge(allOnlineUsers[0].id, nonce);
+                        const success = await this.sendChallenge(allOnlineUsers[0].id, nonce, securityToken);
                         if (success) {
                             myCanSend--;
                             await this.delay(4500);
@@ -2183,10 +2198,10 @@
             }
 
             // Bước 5: Nhận thưởng nếu có
-            const rewardResult = await this.receiveReward(nonce);
+            const rewardResult = await this.receiveReward(nonce, securityToken);
         }
         /**Thuê Tiêu Viêm để hoàn thành khiêu chiến */
-        async thueTieuViem() {
+        async thueTieuViem(securityToken) {
             const nonce = await getNonce();
             if (!nonce) {
                 showNotification('❌ Lỗi: Không thể lấy nonce cho Luận Võ.', 'error');
@@ -2200,7 +2215,8 @@
                         credentials: "include",
                         headers: {
                             "Content-Type": "application/json",
-                            "X-WP-Nonce": nonce
+                            "X-WP-Nonce": nonce,
+                            "X-LV-Token": securityToken
                         },
                         body: JSON.stringify({ bot_id: -1 })
                     });
@@ -5143,6 +5159,94 @@
             this.updateButtonState('autorun');
         }
 
+        // Phương thức tạo menu "Mua Đan Dược"
+        async createMuaDanMenu(parentGroup) {
+            const muaDanButton = document.createElement('button');
+            muaDanButton.textContent = 'Mua Đan Dược';
+            muaDanButton.classList.add('custom-script-menu-button');
+            
+            muaDanButton.addEventListener('click', async () => {
+                const { value: selectedGrade } = await Swal.fire({
+                    title: 'Chọn loại đan dược bắt đầu mua',
+                    text: 'Hệ thống sẽ thử mua từ phẩm cấp đã chọn xuống Nhất Phẩm',
+                    input: 'select',
+                    inputOptions: {
+                        '7': 'Thất Phẩm (7)',
+                        '6': 'Lục Phẩm (6)',
+                        '5': 'Ngũ Phẩm (5)',
+                        '4': 'Tứ Phẩm (4)',
+                        '3': 'Tam Phẩm (3)',
+                        '2': 'Nhị Phẩm (2)',
+                        '1': 'Nhất Phẩm (1)'
+                    },
+                    inputPlaceholder: 'Chọn phẩm cấp...',
+                    showCancelButton: true,
+                    confirmButtonText: 'Bắt đầu',
+                    cancelButtonText: 'Hủy'
+                });
+
+                if (selectedGrade) {
+                    const startGrade = parseInt(selectedGrade);
+                    muaDanButton.disabled = true;
+                    muaDanButton.textContent = 'Đang xử lý...';
+                    
+                    try {
+                        const nonce = await getNonce();
+                        if (!nonce) {
+                            showNotification('Không lấy được Nonce!', 'error');
+                            return;
+                        }
+
+                        const DAN_DUOC_ITEMS = [
+                            { id: 'dan_duoc_that_pham', name: 'Thất Phẩm', grade: 7, count: 1 },
+                            { id: 'dan_duoc_luc_pham',  name: 'Lục Phẩm',  grade: 6, count: 1 },
+                            { id: 'dan_duoc_ngu_pham',  name: 'Ngũ Phẩm',  grade: 5, count: 1 },
+                            { id: 'dan_duoc_tu_pham',   name: 'Tứ Phẩm',   grade: 4, count: 1 },
+                            { id: 'dan_duoc_tam_pham',  name: 'Tam Phẩm',  grade: 3, count: 2 },
+                            { id: 'dan_duoc_nhi_pham',  name: 'Nhị Phẩm',  grade: 2, count: 2 },
+                            { id: 'dan_duoc_nhat_pham', name: 'Nhất Phẩm', grade: 1, count: 3 }
+                        ];
+
+                        // Lọc từ phẩm đã chọn đến 1, sắp xếp từ 7 về 1
+                        const itemsToBuy = DAN_DUOC_ITEMS.filter(item => item.grade <= startGrade).sort((a,b) => b.grade - a.grade);
+
+                        for (const item of itemsToBuy) {
+                            for (let i = 0; i < item.count; i++) {
+                                showNotification(`Đang mua ${item.name} (lần ${i+1}/${item.count})`, 'info');
+                                const res = await fetch(`${weburl}wp-json/tong-mon/v1/buy-dan-duoc-tm`, {
+                                    method: 'POST',
+                                    headers: {
+                                        'Content-Type': 'application/json',
+                                        'X-WP-Nonce': nonce
+                                    },
+                                    body: JSON.stringify({ item_id: item.id }),
+                                    credentials: 'include'
+                                });
+                                const data = await res.json();
+                                if (data && data.success) {
+                                    showNotification(data.message || `Đã mua ${item.name}`, 'success');
+                                    await new Promise(r => setTimeout(r, 1500)); // Tránh spam quá nhanh
+                                } else {
+                                    const msg = data?.message || 'Có lỗi xảy ra hoặc hết giới hạn.';
+                                    showNotification(`${item.name}: ${msg}`, 'warn');
+                                    // Mua thất bại thì nhảy sang loại nhỏ hơn luôn (break loop count)
+                                    break;
+                                }
+                            }
+                        }
+                        showNotification('Đã hoàn thành tiến trình mua đan.', 'success');
+                    } catch (e) {
+                        console.error('Lỗi mua đan:', e);
+                        showNotification('Lỗi hệ thống khi mua đan!', 'error');
+                    } finally {
+                        muaDanButton.disabled = false;
+                        muaDanButton.textContent = 'Mua Đan Dược';
+                    }
+                }
+            });
+            parentGroup.appendChild(muaDanButton);
+        }
+
         // Phương thức tạo menu "Bí Cảnh"
         async createBiCanhMenu(parentGroup) {
             const biCanhButton = document.createElement('button');
@@ -6031,6 +6135,9 @@
                 } else if (link.isDuaTopTM) {
                     // Đua Top Tông Môn
                     this.uiMenuCreator.createDuaTopMenu(groupDiv);
+                } else if (link.isMuaDan) {
+                    // Mua Đan Dược
+                    this.uiMenuCreator.createMuaDanMenu(groupDiv);
                 } else {
                     const menuItem = document.createElement('a');
                     menuItem.classList.add('custom-script-menu-link');
@@ -6444,14 +6551,15 @@
                 showNotification(' Lỗi: Không thể❌ lấy nonce cho Luận Võ.', 'error');
                 return;
             }
-            await luanvo.startLuanVo(nonce);
+            const securityToken = await getSecurityToken(weburl + 'luan-vo-duong?t');
+            await luanvo.startLuanVo(nonce, securityToken);
             let timeTo21h = new Date();
             timeTo21h.setHours(21, 1, 0, 0);
             const delay = timeTo21h.getTime() - Date.now();
             console.log(`[Auto] Lên lịch Luận Võ vào lúc 00:01. Thời gian chờ: ${delay}ms.`);
             if (this.luanvoTimeout) clearTimeout(this.luanvoTimeout);
             if (delay < 0) {
-                await luanvo.thueTieuViem();
+                await luanvo.thueTieuViem(securityToken);
                 await luanvo.doLuanVo(true);
             } else {
                 this.luanvoTimeout = setTimeout(() => this.scheduleLuanVo(), delay);
@@ -6629,7 +6737,6 @@
     // ===============================================
     class hienTuviKhoangMach {
         constructor() {
-            this.selfTuViCache = null;
             this.nonceGetUserInMine = null;
             this.nonce = null;
 
@@ -6781,27 +6888,13 @@
             } catch { return null; }
         }
 
-        async getSelfTuVi() {
-            if (this.selfTuViCache !== null) {
-                return this.selfTuViCache;
-            }
-            const el = document.querySelector('#head_manage_acc');
-            const text = el?.textContent || "";
-            const num = text.match(/\d+/);
-            if (num) {
-                this.selfTuViCache = parseInt(num[0]);
-                return this.selfTuViCache;
-            }
-            return null;
-        }
-
         async getProfileTier(userId) {
             if (!userId) return null;
             try {
                 const res = await fetch(`${weburl}profile/${userId}/`);
                 if (!res.ok) return null;
 
-                const text = await res.text(); // phải await
+                const text = await res.text();
                 const doc = new DOMParser().parseFromString(text, 'text/html');
 
                 const h4 = doc.querySelector('h4');
@@ -6815,252 +6908,31 @@
 
                 return raw.trim();
             } catch (e) {
-                console.error(`${this.logPrefix} ❌ Lỗi mạng (lấy cảnh giới):`, e);
+                console.error(`[Hiện Cảnh Giới] ❌ Lỗi mạng (lấy cảnh giới):`, e);
                 return null;
             }
         }
 
-        winRate(selfTuVi, opponentTuVi) {
-            if (!selfTuVi || !opponentTuVi) return -1;
-            if (typeof selfTuVi !== 'number' || typeof opponentTuVi !== 'number') return -1;
-            if (selfTuVi <= 0 || opponentTuVi <= 0) return -1;
-            if (selfTuVi >= 10 * opponentTuVi) return 100;
-            if (opponentTuVi >= 10 * selfTuVi) return 0;
-            let winChance = 50;
-            const diff = selfTuVi - opponentTuVi;
-            const ratio = diff > 0 ? selfTuVi / opponentTuVi : opponentTuVi / selfTuVi;
-            const factor = ratio >= 8 ? 1 : ratio >= 7 ? 0.9 : ratio >= 6 ? 0.8 :
-                ratio >= 5 ? 0.7 : ratio >= 4 ? 0.6 : ratio >= 3 ? 0.5 :
-                ratio >= 2 ? 0.4 : 0.3;
-            winChance += (diff / 1000) * factor;
-            return Math.max(0, Math.min(100, winChance));
-        }
-
-        async upsertTuViInfo(btn, userId, opponentTuVi, myTuVi) {
-            const cls = 'hh3d-tuvi-info';
-            const next = btn.nextElementSibling;
-            const opponentTuViText = typeof opponentTuVi === 'number' ? opponentTuVi : 'Unknown';
-
-            // Tạo nội dung HTML một lần duy nhất
-            const rate = this.winRate(myTuVi, opponentTuVi).toFixed(2);
-            const rateNumber = parseFloat(rate);
-            let rateColor;
-            if (rateNumber === -1) {
-                rateColor = '#808080'; // Grey
-            }
-                else if (rateNumber < 25) {
-                rateColor = '#ff5f5f'; // Red
-            } else if (rateNumber > 75) {
-                rateColor = '#00ff00'; // Green
-            } else {
-                rateColor = '#ffff00ff'; // White
-            }
-
-            let displayRate = rate;
-            if (rateNumber === 0.00) {
-                displayRate = '0';
-            } else if (rateNumber === 100.00) {
-                displayRate = '100';
-            } else if (rateNumber === -1) {
-                displayRate = 'Không rõ';
-            }
-            let innerHTMLContent = '';
-            if (myTuVi <= 10 * opponentTuVi) {
-            innerHTMLContent = `
-                <p><strong>Tu Vi:</strong> <span style="font-weight: bold; color: #ffff00ff;">${opponentTuViText}</span></p>
-                <p><strong>Tỷ Lệ Thắng:</strong> <span style="font-weight: bold; color: ${rateColor};">${displayRate}%</span></p>
-            `;
-            } else {
-            innerHTMLContent = `
-                <p><strong>Tu Vi:</strong> <span style="font-weight: bold; color: #ffff00ff;">${opponentTuViText}</span></p>
-                <p><span style="font-weight: bold; color: #00ff00ff;">Không tốn lượt</span></p>
-            `;
-            }
-
-            if (next && next.classList.contains(cls) && next.dataset.userId === String(userId)) {
-                next.innerHTML = innerHTMLContent;
-                return;
-            }
-
-            document.querySelectorAll(`.${cls}[data-user-id="${userId}"]`).forEach(el => {
-                if (el !== next) el.remove();
-            });
-
-            const info = document.createElement('div');
-            info.className = cls;
-            info.dataset.userId = String(userId);
-            info.style.fontSize = '12px';
-            info.style.color = '#fff';
-            info.style.marginTop = '3px';
-            info.style.backgroundColor = 'none';
-            info.style.padding = '0px 0px';
-            info.style.border = 'none';
-
-            // Sử dụng biến đã tạo ở trên
-            info.innerHTML = innerHTMLContent;
-
-            btn.insertAdjacentElement('afterend', info);
-        }
-
         async upsertTierInfo(btn, userId) {
-            const cls = 'hh3d-tuvi-info';
+            const cls = 'hh3d-tier-info';
             const next = btn.nextElementSibling;
-            const tierText = await this.getProfileTier(userId);
-            console.log(`UserID: ${userId}, Tier: ${tierText}`);
-            if (!tierText) return;
-            if (next && next.classList.contains(cls) && next.dataset.userId === String(userId)) {
-                next.innerHTML = `<p><strong>Cảnh giới:</strong> <span style="font-weight: bold; color: #ffff00ff;">${tierText}</span></p>`;
-                return;
+            
+            // Xóa info cũ nếu có
+            if (next && next.classList.contains(cls)) {
+                next.remove();
             }
 
-            document.querySelectorAll(`.${cls}[data-user-id="${userId}"]`).forEach(el => {
-                if (el !== next) el.remove();
-            });
+            const tierText = await this.getProfileTier(userId);
+            if (!tierText) return;
+
             const info = document.createElement('div');
             info.className = cls;
             info.dataset.userId = String(userId);
             info.style.fontSize = '12px';
             info.style.color = '#fff';
             info.style.marginTop = '3px';
-            info.style.backgroundColor = 'none';
-            info.style.padding = '0px 0px';
-            info.style.border = 'none';
             info.innerHTML = `<p><strong>Cảnh giới:</strong> <span style="font-weight: bold; color: #ffff00ff;">${tierText}</span></p>`;
             btn.insertAdjacentElement('afterend', info);
-        }
-
-        async getTuVi(userId) {
-            // 0. Chuẩn bị Nonce & Headers
-            if (!this.nonce) {
-                this.nonce = await this.getNonce();
-            }
-            const nonce = this.nonce;
-            if (!nonce) return null;
-
-            const headers = {
-                "Content-Type": "application/json",
-                "X-WP-Nonce": nonce
-            };
-            const targetId = String(userId);
-
-            // ============================================================
-            // 🟢 CÁCH 1: LOGIC CŨ (SEARCH TRỰC TIẾP)
-            // ============================================================
-            try {
-                const res = await fetch(`${weburl}/wp-json/luan-vo/v1/search-users`, {
-                    method: "POST",
-                    headers: headers,
-                    body: JSON.stringify({ query: targetId, page: 1 }),
-                    credentials: "include",
-                    mode: "cors"
-                });
-
-                // Logic gốc: Lấy user đầu tiên trong danh sách (users[0])
-                const points = res.ok ? (await res.json())?.data?.users?.[0]?.points ?? null : null;
-
-                // Nếu tìm thấy điểm -> Trả về luôn
-                if (points !== null && points !== undefined) {
-                    return points;
-                }
-            } catch (e) {
-                // Lỗi ở cách 1 -> Bỏ qua để chạy xuống cách 2
-            }
-
-            // ============================================================
-            // 🔴 CÁCH 2: FALLBACK (FOLLOW -> SCAN -> UNFOLLOW)
-            // ============================================================
-            
-            let tuVi = null;
-
-            try {
-                // B2.1: Follow
-                await fetch(`${weburl}/wp-json/luan-vo/v1/follow`, {
-                    method: "POST",
-                    headers: headers,
-                    body: JSON.stringify({ followed_user_id: targetId }),
-                    credentials: "include",
-                    mode: "cors"
-                });
-
-                // B2.2: Lấy danh sách Following
-                const resList = await fetch(`${weburl}/wp-json/luan-vo/v1/get-following-users`, {
-                    method: "POST",
-                    headers: headers,
-                    body: JSON.stringify({ page: 1 }),
-                    credentials: "include",
-                    mode: "cors"
-                });
-
-                if (resList.ok) {
-                    const jsonList = await resList.json();
-                    if (jsonList.success && jsonList.data && Array.isArray(jsonList.data.users)) {
-                        // Ở danh sách follow thì phải tìm chính xác ID kẻo lấy nhầm người khác
-                        const targetUser = jsonList.data.users.find(u => String(u.id) === targetId);
-                        if (targetUser) {
-                            tuVi = targetUser.points;
-                        }
-                    }
-                }
-
-            } catch (e) {
-                console.error(`[GetTuVi] Fallback lỗi:`, e);
-            } finally {
-                // ============================================================
-                // 🧹 B2.3: UNFOLLOW CHẮC CHẮN (RETRY LOGIC)
-                // ============================================================
-                let retryCount = 0;
-                const maxRetries = 3;
-                let isUnfollowed = false;
-
-                while (retryCount < maxRetries && !isUnfollowed) {
-                    try {
-                        // Nếu là lần retry (retryCount > 0), đợi 1 chút trước khi gọi
-                        if (retryCount > 0) await new Promise(r => setTimeout(r, 1000));
-
-                        const resUn = await fetch(`${weburl}/wp-json/luan-vo/v1/unfollow`, {
-                            method: "POST",
-                            headers: headers,
-                            body: JSON.stringify({ unfollow_user_id: targetId }),
-                            credentials: "include",
-                            mode: "cors"
-                        });
-
-                        const dataUn = await resUn.json();
-
-                        // Kiểm tra dựa trên response bạn cung cấp: {"success":true,"message":"Hủy theo dõi thành công."}
-                        if (dataUn && dataUn.success) {
-                            // console.log(`[GetTuVi] Đã hủy theo dõi ID ${targetId} thành công.`);
-                            isUnfollowed = true;
-                        } else {
-                            console.warn(`[GetTuVi] Hủy theo dõi thất bại (Lần ${retryCount + 1}):`, dataUn.message);
-                        }
-                    } catch (err) {
-                        console.warn(`[GetTuVi] Lỗi mạng khi Unfollow (Lần ${retryCount + 1}):`, err);
-                    }
-                    retryCount++;
-                }
-
-                if (!isUnfollowed) {
-                    console.error(`[GetTuVi] ❌ CẢNH BÁO: Không thể hủy theo dõi ID ${targetId} sau ${maxRetries} lần thử. Vui lòng kiểm tra thủ công.`);
-                }
-            }
-
-            return tuVi;
-        }
-
-        async enemyInfo(userId) {
-            const myTuVi = await this.getSelfTuVi();
-            const opponentTuVi = await this.getTuVi(userId);
-            const winRate = this.winRate(myTuVi, opponentTuVi).toFixed(2);
-            let notCountAttack = false;
-            if (opponentTuVi*10< myTuVi) {
-                notCountAttack = true;
-            }
-            return {
-                tuVi: opponentTuVi,
-                winRate: winRate,
-                notCountAttack: notCountAttack
-            };
         }
 
         async showTotalEnemies(mineId, usersData = null) {
@@ -7076,7 +6948,7 @@
                 } else if (user.lien_minh) {
                     totalLienMinh++;
                 } else {
-                        totalEnemies++;
+                    totalEnemies++;
                 }
             }
 
@@ -7122,35 +6994,26 @@
             }
         }
 
-        async showTuVi(myTuVi) {
-            if (!myTuVi) return;
-
+        async showTuVi() {
             const buttons = document.querySelectorAll('.attack-btn');
             if (buttons.length === 0) return;
 
             for (const btn of buttons) {
                 // Bỏ qua nếu đã xử lý
-                if (btn.dataset.tuviAttached === '1') continue;
-                btn.dataset.tuviAttached = '1';
+                if (btn.dataset.tierAttached === '1') continue;
+                btn.dataset.tierAttached = '1';
 
                 const userId = btn.getAttribute('data-user-id');
                 if (!userId) continue;
 
                 try {
-                    const opponentTuVi = await this.getTuVi(userId);
-                    if (opponentTuVi) {
-                        this.upsertTuViInfo(btn, userId, opponentTuVi, myTuVi);
-                    } else {
-                        // Nếu không lấy được Tu Vi, thử lấy cảnh giới
-                        await new Promise(r => setTimeout(r, 500));
-                        this.upsertTierInfo(btn, userId);
-                    }
+                    await this.upsertTierInfo(btn, userId);
                 } catch (e) {
-                    console.error('[Hiện Tu Vi] ❌ Lỗi getTuVi:', e);
+                    console.error('[Hiện Cảnh Giới] ❌ Lỗi upsertTierInfo:', e);
                 }
 
-                // Nghỉ 1s tránh spam API
-                await new Promise(r => setTimeout(r, 1000));
+                // Nghỉ một chút tránh spam profile fetch
+                await new Promise(r => setTimeout(r, 600));
             }
         }
 
@@ -7159,24 +7022,17 @@
                 await new Promise(resolve => document.addEventListener('DOMContentLoaded', resolve, { once: true }));
             }
             
-            // Lấy nonce để sử dụng cho các API calls
-            this.nonce = await this.getNonce();
+            // Đợi phần quản lý tài khoản load xong (nếu cần)
             await this.waitForElement('#head_manage_acc', 15000);
 
-            const myTuVi = await this.getSelfTuVi();
-            if (!myTuVi) {
-                console.warn('[Hiện Tu Vi] ⚠️ Không lấy được Tu Vi của bản thân');
-                return;
-            }
+            // Hiển thị Cảnh giới cho các nút attack hiện có
+            await this.showTuVi();
 
-            // Hiển thị Tu Vi cho các nút attack hiện có
-            await this.showTuVi(myTuVi);
-
-            // Quan sát DOM để cập nhật khi có nút attack mới
+            // Quan sát DOM để cập nhật khi có nút attack mới (khi chuyển trang mỏ hoặc load thêm user)
             let debounceTimeout = null;
             const observer = new MutationObserver(() => {
                 clearTimeout(debounceTimeout);
-                debounceTimeout = setTimeout(() => this.showTuVi(myTuVi), 300);
+                debounceTimeout = setTimeout(() => this.showTuVi(), 500);
             });
             observer.observe(document.body, { childList: true, subtree: true });
         }
